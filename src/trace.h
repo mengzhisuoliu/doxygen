@@ -44,10 +44,11 @@
 
 #include "types.h"
 #include "qcstring.h"
+#include "construct.h"
 
 extern std::shared_ptr<spdlog::logger> g_tracer;
 
-void initTracing(const QCString &logFile);
+void initTracing(const QCString &logFile, bool timing);
 void exitTracing();
 
 namespace Trace
@@ -99,7 +100,7 @@ class AutoTrace
         }
         else
         {
-          g_tracer->log(m_loc,spdlog::level::trace,"> "+fmt,std::forward<Args>(args)...);
+          g_tracer->log(m_loc,spdlog::level::trace,fmt::runtime("> "+fmt),std::forward<Args>(args)...);
         }
       }
     }
@@ -117,19 +118,23 @@ class AutoTrace
         }
       }
     }
+    NON_COPYABLE(AutoTrace)
+
     template<typename... Args>
     void add(spdlog::source_loc loc,
              const std::string &fmt, Args&&...args)
     {
       if (g_tracer)
       {
-        g_tracer->log(loc,spdlog::level::trace,": "+fmt,std::forward<Args>(args)...);
+        g_tracer->log(loc,spdlog::level::trace,fmt::runtime(": "+fmt),std::forward<Args>(args)...);
       }
     }
     template<typename... Args>
-    void setExit(const std::string &msg,Args&&...args)
+    void setExit(spdlog::source_loc loc,
+                 const std::string &msg,Args&&...args)
     {
-      m_exitMessage = fmt::format(msg,std::forward<Args>(args)...);
+      m_loc = loc;
+      m_exitMessage = fmt::format(fmt::runtime(msg),std::forward<Args>(args)...);
     }
   private:
    spdlog::source_loc m_loc;
@@ -139,7 +144,7 @@ class AutoTrace
 #if ENABLE_TRACING
 #define AUTO_TRACE(...)      AutoTrace trace_{spdlog::source_loc{__FILE__,__LINE__,SPDLOG_FUNCTION},__VA_ARGS__}
 #define AUTO_TRACE_ADD(...)  trace_.add(spdlog::source_loc{__FILE__,__LINE__,SPDLOG_FUNCTION},__VA_ARGS__)
-#define AUTO_TRACE_EXIT(...) trace_.setExit(__VA_ARGS__)
+#define AUTO_TRACE_EXIT(...) trace_.setExit(spdlog::source_loc{__FILE__,__LINE__,SPDLOG_FUNCTION},__VA_ARGS__)
 #else
 #define AUTO_TRACE(...)      (void)0
 #define AUTO_TRACE_ADD(...)  (void)0
@@ -153,7 +158,7 @@ namespace fmt { template<typename T> struct formatter {}; }
 //! adds support for formatting QCString
 template<> struct fmt::formatter<QCString> : formatter<std::string>
 {
-  auto format(const QCString &c, format_context& ctx) {
+  auto format(const QCString &c, format_context& ctx) const {
     return formatter<std::string>::format(c.str(), ctx);
   }
 };
@@ -161,7 +166,7 @@ template<> struct fmt::formatter<QCString> : formatter<std::string>
 //! adds support for formatting Protected
 template<> struct fmt::formatter<Protection> : formatter<std::string>
 {
-  auto format(Protection prot, format_context& ctx) {
+  auto format(Protection prot, format_context& ctx) const {
     std::string result="Unknown";
     switch (prot)
     {
@@ -177,7 +182,7 @@ template<> struct fmt::formatter<Protection> : formatter<std::string>
 //! adds support for formatting Specifier
 template<> struct fmt::formatter<Specifier> : formatter<std::string>
 {
-  auto format(Specifier spec, format_context& ctx) {
+  auto format(Specifier spec, format_context& ctx) const {
     std::string result="Unknown";
     switch (spec)
     {
@@ -192,7 +197,7 @@ template<> struct fmt::formatter<Specifier> : formatter<std::string>
 //! adds support for formatting MethodTypes
 template<> struct fmt::formatter<MethodTypes> : formatter<std::string>
 {
-  auto format(MethodTypes mtype, format_context& ctx) {
+  auto format(MethodTypes mtype, format_context& ctx) const {
     std::string result="Unknown";
     switch (mtype)
     {
@@ -210,7 +215,7 @@ template<> struct fmt::formatter<MethodTypes> : formatter<std::string>
 //! adds support for formatting RelatesType
 template<> struct fmt::formatter<RelatesType> : formatter<std::string>
 {
-  auto format(RelatesType type, format_context& ctx) {
+  auto format(RelatesType type, format_context& ctx) const {
     std::string result="Unknown";
     switch (type)
     {
@@ -225,7 +230,7 @@ template<> struct fmt::formatter<RelatesType> : formatter<std::string>
 //! adds support for formatting RelationShip
 template<> struct fmt::formatter<Relationship> : formatter<std::string>
 {
-  auto format(Relationship relation, format_context& ctx) {
+  auto format(Relationship relation, format_context& ctx) const {
     std::string result="Unknown";
     switch (relation)
     {
@@ -240,28 +245,28 @@ template<> struct fmt::formatter<Relationship> : formatter<std::string>
 //! adds support for formatting SrcLangExt
 template<> struct fmt::formatter<SrcLangExt> : formatter<std::string>
 {
-  auto format(SrcLangExt lang, format_context& ctx) {
+  auto format(SrcLangExt lang, format_context& ctx) const {
     std::string result="Unknown";
     switch (lang)
     {
-      case SrcLangExt_Unknown:  result="Unknown";     break;
-      case SrcLangExt_IDL:      result="IDL";         break;
-      case SrcLangExt_Java:     result="Java";        break;
-      case SrcLangExt_CSharp:   result="C#";          break;
-      case SrcLangExt_D:        result="D";           break;
-      case SrcLangExt_PHP:      result="PHP";         break;
-      case SrcLangExt_ObjC:     result="Objective-C"; break;
-      case SrcLangExt_Cpp:      result="C++";         break;
-      case SrcLangExt_JS:       result="Javascript";  break;
-      case SrcLangExt_Python:   result="Python";      break;
-      case SrcLangExt_Fortran:  result="Fortran";     break;
-      case SrcLangExt_VHDL:     result="VHDL";        break;
-      case SrcLangExt_XML:      result="XML";         break;
-      //case SrcLangExt_Tcl:    result="Tcl";         break;
-      case SrcLangExt_Markdown: result="Markdown";    break;
-      case SrcLangExt_SQL:      result="SQL";         break;
-      case SrcLangExt_Slice:    result="Slice";       break;
-      case SrcLangExt_Lex:      result="Lex";         break;
+      case SrcLangExt::Unknown:  result="Unknown";     break;
+      case SrcLangExt::IDL:      result="IDL";         break;
+      case SrcLangExt::Java:     result="Java";        break;
+      case SrcLangExt::CSharp:   result="C#";          break;
+      case SrcLangExt::D:        result="D";           break;
+      case SrcLangExt::PHP:      result="PHP";         break;
+      case SrcLangExt::ObjC:     result="Objective-C"; break;
+      case SrcLangExt::Cpp:      result="C++";         break;
+      case SrcLangExt::JS:       result="Javascript";  break;
+      case SrcLangExt::Python:   result="Python";      break;
+      case SrcLangExt::Fortran:  result="Fortran";     break;
+      case SrcLangExt::VHDL:     result="VHDL";        break;
+      case SrcLangExt::XML:      result="XML";         break;
+      //case SrcLangExt::Tcl:    result="Tcl";         break;
+      case SrcLangExt::Markdown: result="Markdown";    break;
+      case SrcLangExt::SQL:      result="SQL";         break;
+      case SrcLangExt::Slice:    result="Slice";       break;
+      case SrcLangExt::Lex:      result="Lex";         break;
     }
     return formatter<std::string>::format(result, ctx);
   }
@@ -270,26 +275,26 @@ template<> struct fmt::formatter<SrcLangExt> : formatter<std::string>
 //! adds support for formatting MemberType
 template<> struct fmt::formatter<MemberType> : formatter<std::string>
 {
-  auto format(MemberType mtype, format_context& ctx) {
+  auto format(MemberType mtype, format_context& ctx) const {
     std::string result="Unknown";
     switch (mtype)
     {
-      case MemberType_Define:      result="Define";      break;
-      case MemberType_Function:    result="Function";    break;
-      case MemberType_Variable:    result="Variable";    break;
-      case MemberType_Typedef:     result="Typedef";     break;
-      case MemberType_Enumeration: result="Enumeration"; break;
-      case MemberType_EnumValue:   result="EnumValue";   break;
-      case MemberType_Signal:      result="Signal";      break;
-      case MemberType_Slot:        result="Slot";        break;
-      case MemberType_Friend:      result="Friend";      break;
-      case MemberType_DCOP:        result="DCOP";        break;
-      case MemberType_Property:    result="Property";    break;
-      case MemberType_Event:       result="Event";       break;
-      case MemberType_Interface:   result="Interface";   break;
-      case MemberType_Service:     result="Service";     break;
-      case MemberType_Sequence:    result="Sequence";    break;
-      case MemberType_Dictionary:  result="Dictionary";  break;
+      case MemberType::Define:      result="Define";      break;
+      case MemberType::Function:    result="Function";    break;
+      case MemberType::Variable:    result="Variable";    break;
+      case MemberType::Typedef:     result="Typedef";     break;
+      case MemberType::Enumeration: result="Enumeration"; break;
+      case MemberType::EnumValue:   result="EnumValue";   break;
+      case MemberType::Signal:      result="Signal";      break;
+      case MemberType::Slot:        result="Slot";        break;
+      case MemberType::Friend:      result="Friend";      break;
+      case MemberType::DCOP:        result="DCOP";        break;
+      case MemberType::Property:    result="Property";    break;
+      case MemberType::Event:       result="Event";       break;
+      case MemberType::Interface:   result="Interface";   break;
+      case MemberType::Service:     result="Service";     break;
+      case MemberType::Sequence:    result="Sequence";    break;
+      case MemberType::Dictionary:  result="Dictionary";  break;
     }
     return formatter<std::string>::format(result, ctx);
   }
@@ -298,7 +303,7 @@ template<> struct fmt::formatter<MemberType> : formatter<std::string>
 //! adds support for formatting TypeSpecifier
 template<> struct fmt::formatter<TypeSpecifier> : formatter<std::string>
 {
-  auto format(TypeSpecifier type, format_context& ctx) {
+  auto format(TypeSpecifier type, format_context& ctx) const {
     return formatter<std::string>::format(type.to_string(),ctx);
   }
 };
@@ -306,7 +311,15 @@ template<> struct fmt::formatter<TypeSpecifier> : formatter<std::string>
 //! adds support for formatting EntryType
 template<> struct fmt::formatter<EntryType> : formatter<std::string>
 {
-  auto format(EntryType type, format_context& ctx) {
+  auto format(EntryType type, format_context& ctx) const {
+    return formatter<std::string>::format(type.to_string(),ctx);
+  }
+};
+
+//! adds support for formatting MemberListType
+template<> struct fmt::formatter<MemberListType> : formatter<std::string>
+{
+  auto format(MemberListType type, format_context& ctx) const {
     return formatter<std::string>::format(type.to_string(),ctx);
   }
 };

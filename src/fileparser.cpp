@@ -21,6 +21,7 @@ void FileCodeParser::parseCode(OutputCodeList &codeOutIntf,
                const QCString &,    // scopeName
                const QCString &     input,
                SrcLangExt,          // lang
+               bool,                // stripCodeComments
                bool,                // isExampleBlock
                const QCString &,    // exampleName
                const FileDef *      fileDef,
@@ -34,15 +35,15 @@ void FileCodeParser::parseCode(OutputCodeList &codeOutIntf,
               )
 {
   int lineNr = startLine!=-1 ? startLine : 1;
-  int length = input.length();
-  int i=0;
+  size_t length = input.length();
+  size_t i=0;
   while (i<length && (endLine==-1 || lineNr<=endLine))
   {
-    int j=i;
+    size_t j=i;
     while (j<length && input[j]!='\n') j++;
     QCString lineStr = input.mid(i,j-i);
     codeOutIntf.startCodeLine(lineNr);
-    if (fileDef != 0 && showLineNumbers)
+    if (fileDef != nullptr && showLineNumbers)
     {
       codeOutIntf.writeLineNumber(QCString(),QCString(),QCString(),lineNr,!inlineFragment);
     }

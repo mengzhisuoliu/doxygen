@@ -91,7 +91,7 @@ function initMenu(relPath,searchEnabled,serverSide,searchPage,search,treeview) {
   let prevWidth = 0;
   if ($mainMenuState.length) {
     const initResizableIfExists = function() {
-      if (typeof initResizable==='function') initResizable();
+      if (typeof initResizable==='function') initResizable(treeview);
     }
     // animate mobile menu
     $mainMenuState.change(function() {
@@ -130,8 +130,5 @@ function initMenu(relPath,searchEnabled,serverSide,searchPage,search,treeview) {
     $(window).resize(resetState);
   }
   $('#main-menu').smartmenus();
-  if (!treeview) { // make sure we stay under the stick menu
-    $('html').css('scroll-padding-top','36px');
-  }
 }
 /* @license-end */

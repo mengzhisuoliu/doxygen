@@ -55,7 +55,6 @@ struct FTVNode
     : isLast(TRUE), isDir(dir), ref(r), file(f), anchor(a), name(n),
       separateIndex(sepIndex), addToNavIndex(navIndex),
       def(df) {}
- ~FTVNode() = default;
   int computeTreeDepth(int level) const;
   int numNodesAtLevel(int level,int maxLevel) const;
   bool isLast;
@@ -119,7 +118,6 @@ struct FTVHelp::Private
  */
 FTVHelp::FTVHelp(bool TLI) : p(std::make_unique<Private>(TLI)) {}
 FTVHelp::~FTVHelp() = default;
-FTVHelp::FTVHelp(FTVHelp &&) = default;
 
 /*! This will create a folder tree view table of contents file (tree.js).
  *  \sa finalize()
@@ -330,7 +328,7 @@ static void generateBriefDoc(TextStream &t,const Definition *def)
     auto parser { createDocParser() };
     auto ast    { validatingParseDoc(*parser.get(),
                                      def->briefFile(),def->briefLine(),
-                                     def,0,brief,FALSE,FALSE,
+                                     def,nullptr,brief,FALSE,FALSE,
                                      QCString(),TRUE,TRUE,Config_getBool(MARKDOWN_SUPPORT)) };
     const DocNodeAST *astImpl = dynamic_cast<const DocNodeAST*>(ast.get());
     if (astImpl)
@@ -347,7 +345,7 @@ static void generateBriefDoc(TextStream &t,const Definition *def)
 static char compoundIcon(const ClassDef *cd)
 {
   char icon='C';
-  if (cd->getLanguage() == SrcLangExt_Slice)
+  if (cd->getLanguage() == SrcLangExt::Slice)
   {
     if (cd->compoundType()==ClassDef::Interface)
     {
@@ -393,11 +391,11 @@ void FTVHelp::Private::generateTree(TextStream &t, const FTVNodes &nl,int level,
       }
       else if (n->def && n->def->definitionType()==Definition::TypeNamespace)
       {
-        if ((n->def->getLanguage() == SrcLangExt_Slice) || (n->def->getLanguage() == SrcLangExt_Fortran))
+        if ((n->def->getLanguage() == SrcLangExt::Slice) || (n->def->getLanguage() == SrcLangExt::Fortran))
         {
           t << "<span class=\"icona\"><span class=\"icon\">M</span></span>";
         }
-        else if ((n->def->getLanguage() == SrcLangExt_Java) || (n->def->getLanguage() == SrcLangExt_VHDL))
+        else if ((n->def->getLanguage() == SrcLangExt::Java) || (n->def->getLanguage() == SrcLangExt::VHDL))
         {
           t << "<span class=\"icona\"><span class=\"icon\">P</span></span>";
         }
@@ -435,7 +433,7 @@ void FTVHelp::Private::generateTree(TextStream &t, const FTVNodes &nl,int level,
     }
     else // leaf node
     {
-      const FileDef *srcRef=0;
+      const FileDef *srcRef=nullptr;
       if (n->def && n->def->definitionType()==Definition::TypeFile &&
           (toFileDef(n->def))->generateSourceFile())
       {
@@ -457,11 +455,11 @@ void FTVHelp::Private::generateTree(TextStream &t, const FTVNodes &nl,int level,
       }
       else if (n->def && n->def->definitionType()==Definition::TypeNamespace)
       {
-        if ((n->def->getLanguage() == SrcLangExt_Slice) || (n->def->getLanguage() == SrcLangExt_Fortran))
+        if ((n->def->getLanguage() == SrcLangExt::Slice) || (n->def->getLanguage() == SrcLangExt::Fortran))
         {
           t << "<span class=\"icona\"><span class=\"icon\">M</span></span>";
         }
-        else if ((n->def->getLanguage() == SrcLangExt_Java) || (n->def->getLanguage() == SrcLangExt_VHDL))
+        else if ((n->def->getLanguage() == SrcLangExt::Java) || (n->def->getLanguage() == SrcLangExt::VHDL))
         {
           t << "<span class=\"icona\"><span class=\"icon\">P</span></span>";
         }
@@ -625,8 +623,8 @@ static bool generateJSTree(NavIndexEntryList &navIndex,TextStream &t,
       if (n->def && n->def->definitionType()==Definition::TypeFile)
       {
         const FileDef *fd = toFileDef(n->def);
-        bool doc,src;
-        doc = fileVisibleInIndex(fd,src);
+        bool src = false;
+        bool doc = fileVisibleInIndex(fd,src);
         if (doc)
         {
           navIndex.emplace_back(node2URL(n,TRUE,FALSE),pathToNode(n,n));
@@ -780,7 +778,7 @@ static void generateJSNavTree(const FTVNodes &nodeList)
     t << "];\n\n";
 
     // write the navigation index (and sub-indices)
-    std::sort(navIndex.begin(),navIndex.end(),[](const auto &n1,const auto &n2)
+    std::stable_sort(navIndex.begin(),navIndex.end(),[](const auto &n1,const auto &n2)
         { return !n1.url.isEmpty() && (n2.url.isEmpty() || (n1.url<n2.url)); });
 
     int subIndex=0;
@@ -871,28 +869,6 @@ void FTVHelp::generateTreeViewScripts()
 
   // generate navtree.js & navtreeindex.js
   generateJSNavTree(p->indentNodes[0]);
-
-  // copy resize.js & navtree.css
-  auto &mgr = ResourceMgr::instance();
-  {
-    std::ofstream f = Portable::openOutputStream(htmlOutput+"/resize.js");
-    if (f.is_open())
-    {
-      TextStream t(&f);
-      t << substitute(
-             substitute(mgr.getAsString("resize.js"),
-                "$TREEVIEW_WIDTH", QCString().setNum(Config_getInt(TREEVIEW_WIDTH))),
-                "$PROJECTID",      getProjectId());
-    }
-  }
-  {
-    std::ofstream f = Portable::openOutputStream(htmlOutput+"/navtree.css");
-    if (f.is_open())
-    {
-      TextStream t(&f);
-      t << HtmlGenerator::getNavTreeCss();
-    }
-  }
 }
 
 // write tree inside page

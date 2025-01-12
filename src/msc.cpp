@@ -42,7 +42,7 @@ static bool convertMapFile(TextStream &t,const QCString &mapName,const QCString 
   const int maxLineLen=1024;
   char url[maxLineLen];
   char ref[maxLineLen];
-  int x1,y1,x2,y2;
+  int x1=0, y1=0, x2=0, y2=0;
   std::string line;
   while (getline(f,line))
   {
@@ -162,19 +162,19 @@ void writeMscGraphFromFile(const QCString &inFile,const QCString &outDir,
   absOutFile+=Portable::pathSeparator();
   absOutFile+=outFile;
 
-  mscgen_format_t msc_format;
+  mscgen_format_t msc_format = mscgen_format_png;
   QCString imgName = absOutFile;
   switch (format)
   {
-    case MSC_BITMAP:
+    case MscOutputFormat::BITMAP:
       msc_format = mscgen_format_png;
       imgName+=".png";
       break;
-    case MSC_EPS:
+    case MscOutputFormat::EPS:
       msc_format = mscgen_format_eps;
       imgName+=".eps";
       break;
-    case MSC_SVG:
+    case MscOutputFormat::SVG:
       msc_format = mscgen_format_svg;
       imgName+=".svg";
       break;
@@ -186,9 +186,9 @@ void writeMscGraphFromFile(const QCString &inFile,const QCString &outDir,
     return;
   }
 
-  if ( (format==MSC_EPS) && (Config_getBool(USE_PDFLATEX)) )
+  if ( (format==MscOutputFormat::EPS) && (Config_getBool(USE_PDFLATEX)) )
   {
-    QCString epstopdfArgs(maxCmdLine);
+    QCString epstopdfArgs(maxCmdLine, QCString::ExplicitSize);
     epstopdfArgs.sprintf("\"%s.eps\" --outfile=\"%s.pdf\"",
                          qPrint(absOutFile),qPrint(absOutFile));
     if (Portable::system("epstopdf",epstopdfArgs)!=0)
@@ -196,8 +196,17 @@ void writeMscGraphFromFile(const QCString &inFile,const QCString &outDir,
       err_full(srcFile,srcLine,"Problems running epstopdf when processing '%s.eps'. Check your TeX installation!",
           qPrint(absOutFile));
     }
+    else
+    {
+      Dir().remove((absOutFile + ".eps").data());
+    }
   }
 
+  int i=std::max(imgName.findRev('/'),imgName.findRev('\\'));
+  if (i!=-1) // strip path
+  {
+    imgName=imgName.right(imgName.length()-i-1);
+  }
   Doxygen::indexList->addImageFile(imgName);
 
 }
@@ -235,19 +244,19 @@ void writeMscImageMapFromFile(TextStream &t,const QCString &inFile,
   t << "<img src=\"" << relPath << baseName << ".";
   switch (format)
   {
-    case MSC_BITMAP:
+    case MscOutputFormat::BITMAP:
       t << "png";
       break;
-    case MSC_EPS:
+    case MscOutputFormat::EPS:
       t << "eps";
       break;
-    case MSC_SVG:
+    case MscOutputFormat::SVG:
       t << "svg";
       break;
     default:
       t << "unknown";
   }
-  QCString imap = getMscImageMapFromFile(inFile,outDir,relPath,context,format==MSC_SVG,srcFile,srcLine);
+  QCString imap = getMscImageMapFromFile(inFile,outDir,relPath,context,format==MscOutputFormat::SVG,srcFile,srcLine);
   if (!imap.isEmpty())
   {
     t << "\" alt=\""

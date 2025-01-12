@@ -120,7 +120,7 @@ DotFilePatcher *DotManager::createFilePatcher(const QCString &fileName)
 
   if (patcher != m_filePatchers.end()) return &(patcher->second);
 
-  auto rv = m_filePatchers.emplace(std::make_pair(fileName.str(), fileName));
+  auto rv = m_filePatchers.emplace(fileName.str(), fileName);
   assert(rv.second);
   return &(rv.first->second);
 }
@@ -243,11 +243,11 @@ void writeDotGraphFromFile(const QCString &inFile,const QCString &outDir,
   QCString absOutFile = QCString(d.absPath())+"/"+outFile;
 
   DotRunner dotRun(inFile);
-  if (format==GOF_BITMAP)
+  if (format==GraphOutputFormat::BITMAP)
   {
     dotRun.addJob(Config_getEnumAsString(DOT_IMAGE_FORMAT),absImgName,srcFile,srcLine);
   }
-  else // format==GOF_EPS
+  else // format==GraphOutputFormat::EPS
   {
     if (Config_getBool(USE_PDFLATEX))
     {
