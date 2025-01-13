@@ -5,7 +5,7 @@ import argparse, glob, itertools, re, shutil, os, sys
 import subprocess
 import shlex
 
-config_reg = re.compile('.*\/\/\s*(?P<name>\S+):\s*(?P<value>.*)$')
+config_reg = re.compile(r'.*\/\/\s*(?P<name>\S+):\s*(?P<value>.*)$')
 bkmk_reg = re.compile(r'.*bkmkstart\s+([A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z]).*')
 hyper_reg = re.compile(r'.*HYPERLINK\s+[\\l]*\s+"([A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z])".*')
 pageref_reg = re.compile(r'.*PAGEREF\s+([A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z][A-Z]).*')
@@ -65,6 +65,9 @@ class Tester:
         self.test      = test
         self.update    = args.updateref
         self.config    = self.get_config()
+        if not 'objective' in self.config:
+            print("Test %s is missing the objective." % self.test)
+            sys.exit(1)
         self.test_name = '[%s]: %s' % (self.test,self.config['objective'][0])
         self.test_id   = self.test.split('_')[0]
         if self.update:
@@ -200,7 +203,7 @@ class Tester:
         if (self.args.noredir):
             redir=''
 
-        if os.system('%s %s/Doxyfile %s' % (self.args.doxygen,self.test_out,redir))!=0:
+        if os.system('%s %s %s/Doxyfile %s' % (self.args.doxygen,self.args.doxygen_dbg,self.test_out,redir))!=0:
             print('Error: failed to run %s on %s/Doxyfile' % (self.args.doxygen,self.test_out))
             sys.exit(1)
 
@@ -265,6 +268,7 @@ class Tester:
                     print(data,file=f)
         shutil.rmtree(self.test_out+'/out',ignore_errors=True)
         os.remove(self.test_out+'/Doxyfile')
+        os.remove(self.test_out+'/warnings.log')
         return True
 
     # check the relevant files of a doxygen run with the reference material
@@ -619,6 +623,8 @@ def main():
         'update the reference file(s) for the given test',action="store_true")
     parser.add_argument('--doxygen',nargs='?',default='doxygen',help=
         'path/name of the doxygen executable')
+    parser.add_argument('--doxygen_dbg',nargs='?',default='',help=
+        'the doxygen debugging arguments')
     parser.add_argument('--xmllint',nargs='?',default='xmllint',help=
         'path/name of the xmllint executable')
     parser.add_argument('--id',nargs='+',dest='ids',action='append',type=int,help=

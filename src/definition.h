@@ -20,6 +20,7 @@
 
 #include "types.h"
 #include "reflist.h"
+#include "construct.h"
 
 #ifdef _MSC_VER
 // To disable 'inherits via dominance' warnings with MSVC.
@@ -63,7 +64,7 @@ struct BodyInfo
     int      defLine = -1;     //!< line number of the start of the definition
     int      startLine = -1;   //!< line number of the start of the definition's body
     int      endLine = -1;     //!< line number of the end of the definition's body
-    const FileDef *fileDef = 0;      //!< file definition containing the function body
+    const FileDef *fileDef = nullptr;      //!< file definition containing the function body
 };
 
 /** The common base class of all entity definitions found in the sources.
@@ -74,6 +75,8 @@ struct BodyInfo
 class Definition
 {
   public:
+    ABSTRACT_BASE_CLASS(Definition)
+
     /*! Types of derived classes */
     enum DefType
     {
@@ -274,6 +277,7 @@ class Definition
     virtual bool hasSections() const = 0;
     virtual bool hasSources() const = 0;
 
+
     /** returns TRUE if this class has a brief description */
     virtual bool hasBriefDescription() const = 0;
 
@@ -291,13 +295,9 @@ class Definition
     virtual void _setSymbolName(const QCString &name) = 0;
     virtual QCString _symbolName() const = 0;
 
-    // ---------------------------------
-    virtual ~Definition() = default;
-
   private:
     friend class DefinitionImpl;
     friend DefinitionMutable* toDefinitionMutable(Definition *);
-    friend DefinitionMutable* toDefinitionMutable(const Definition *);
     virtual DefinitionMutable *toDefinitionMutable_() = 0;
     virtual const DefinitionImpl *toDefinitionImpl_() const = 0;
 };
@@ -305,7 +305,7 @@ class Definition
 class DefinitionMutable
 {
   public:
-
+    ABSTRACT_BASE_CLASS(DefinitionMutable)
 
     //-----------------------------------------------------------------------------------
     // ----  setters -----
@@ -361,11 +361,10 @@ class DefinitionMutable
      * documentation.
      */
     virtual void addSectionsToDefinition(const std::vector<const SectionInfo*> &anchorList) = 0;
-    virtual void addSourceReferencedBy(MemberDef *d) = 0;
-    virtual void addSourceReferences(MemberDef *d) = 0;
+    virtual void addSourceReferencedBy(MemberDef *d,const QCString &sourceRefName) = 0;
+    virtual void addSourceReferences(MemberDef *d,const QCString &sourceRefName) = 0;
     virtual void mergeRefItems(Definition *d) = 0;
     virtual void addInnerCompound(Definition *d) = 0;
-    virtual void addSectionsToIndex() = 0;
     virtual void mergeReferences(const Definition *other) = 0;
     virtual void mergeReferencedBy(const Definition *other) = 0;
     virtual void computeTooltip() = 0;
@@ -373,7 +372,7 @@ class DefinitionMutable
     //-----------------------------------------------------------------------------------
     // --- writing output ----
     //-----------------------------------------------------------------------------------
-    virtual void writeSourceDef(OutputList &ol,const QCString &scopeName) const = 0;
+    virtual void writeSourceDef(OutputList &ol) const = 0;
     virtual void writeInlineCode(OutputList &ol,const QCString &scopeName) const = 0;
     virtual bool hasSourceRefs() const = 0;
     virtual bool hasSourceReffedBy() const = 0;
@@ -384,9 +383,6 @@ class DefinitionMutable
     virtual void writeSummaryLinks(OutputList &) const = 0;
     virtual void writeDocAnchorsToTagFile(TextStream &) const = 0;
     virtual void writeToc(OutputList &ol, const LocalToc &lt) const = 0;
-
-    // ---------------------------------
-    virtual ~DefinitionMutable() = default;
 
   private:
     friend Definition* toDefinition(DefinitionMutable *);

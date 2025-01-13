@@ -58,11 +58,11 @@
              - [any mark] introduced instead of [unreachable] only
              - marks highlighted in HTML
   2010/08/30 - Highlighting in what will be the table in langhowto.html modified.
-  2010/09/27 - The underscore in \latexonly part of the generated language.dox
+  2010/09/27 - The underscore in \\latexonly part of the generated language.dox
                was prefixed by backslash (was LaTeX related error).
   2013/02/19 - Better diagnostics when translator_xx.h is too crippled.
   2013/06/25 - TranslatorDecoder checks removed after removing the class.
-  2013/09/04 - Coloured status in langhowto. *ALMOST up-to-date* category
+  2013/09/04 - Colored status in langhowto. *ALMOST up-to-date* category
                of translators introduced.
   2014/06/16 - unified for Python 2.6+ and 3.0+
   """
@@ -545,6 +545,7 @@ class Transl:
         status = 0
         curlyCnt = 0      # counter for the level of curly braces
 
+        backStatus = 2
         # Loop until the final state 777 is reached. The errors are processed
         # immediately. In this implementation, it always quits the application.
         while status != 777:
@@ -558,6 +559,7 @@ class Transl:
 
             elif status == 1:    # colon after the 'public'
                 if tokenId == 'colon':
+                    backStatus = 2
                     status = 2
                 else:
                     self.__unexpectedToken(status, tokenId, tokenLineNo)
@@ -566,10 +568,16 @@ class Transl:
                 if tokenId == 'virtual':
                     prototype = tokenStr  # but not to unified prototype
                     status = 3
+                elif tokenId == 'id' and tokenStr == 'QCString' and backStatus == 3:
+                    status = 4
                 elif tokenId == 'comment':
                     pass
                 elif tokenId == 'rcurly':
                     status = 11         # expected end of class
+                elif tokenId == 'id' and tokenStr == 'ABSTRACT_BASE_CLASS':
+                    status = 18
+                elif tokenId == 'protected':
+                    status = 19
                 else:
                     self.__unexpectedToken(status, tokenId, tokenLineNo)
 
@@ -705,10 +713,35 @@ class Transl:
                     prototype += ', '
                     uniPrototype += ', '
                     status = 6
+                elif tokenId == 'assign':
+                    status=20
                 elif tokenId == 'rpar':
                     prototype += tokenStr
                     uniPrototype += tokenStr
                     status = 7
+                else:
+                    self.__unexpectedToken(status, tokenId, tokenLineNo)
+
+            elif status == 18:    # start of the ABSTRACT_BASE_CLASS
+                if tokenId == 'lpar':
+                    pass
+                elif tokenId == 'rpar':
+                    status = 2
+                elif tokenId == 'id':
+                    pass
+                else:
+                    self.__unexpectedToken(status, tokenId, tokenLineNo)
+
+            elif status == 19:    # colon after the 'protected'
+                if tokenId == 'colon':
+                    backStatus = 3
+                    status = 3
+                else:
+                    self.__unexpectedToken(status, tokenId, tokenLineNo)
+
+            elif status == 20:
+                if tokenId == 'string':
+                    status = 17
                 else:
                     self.__unexpectedToken(status, tokenId, tokenLineNo)
 
@@ -878,12 +911,12 @@ class Transl:
 
                         assert(uniPrototype not in self.prototypeDic)
                         # Insert new dictionary item, unless they have a default in translator.h
-                        if (not (prototype=="virtual QCString latexDocumentPost()" or
-                                 prototype=="virtual QCString latexDocumentPre()" or
-                                 prototype=="virtual QCString latexCommandName()" or
-                                 prototype=="virtual QCString latexFont()" or
-                                 prototype=="virtual QCString latexFontenc()" or
-                                 prototype=="virtual bool needsPunctuation()")):
+                        if (not (prototype=="QCString latexDocumentPost()" or
+                                 prototype=="QCString latexDocumentPre()" or
+                                 prototype=="QCString latexCommandName()" or
+                                 prototype=="QCString latexFont()" or
+                                 prototype=="QCString latexFontenc()" or
+                                 prototype=="bool needsPunctuation()")):
                             self.prototypeDic[uniPrototype] = prototype
                         status = 2      # body consumed
                         methodId = None # outside of any method
@@ -1471,7 +1504,7 @@ class TrManager:
         # Remove the items for identifiers that were found in the file.
         while lst_in:
             item = lst_in.pop(0)
-            rexItem = re.compile('.*' + item + ' *\(')
+            rexItem = re.compile(r'.*' + item + r' *\(')
             if rexItem.match(cont):
                 del dic[item]
 

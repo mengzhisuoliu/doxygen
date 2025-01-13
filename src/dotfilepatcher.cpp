@@ -26,8 +26,15 @@
 #include "portable.h"
 
 // top part of the interactive SVG header
-static const char svgZoomHeader1[] = R"svg(
+static const char svgZoomHeader0[] = R"svg(
 <svg id="main" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve" onload="init(evt)">
+)svg";
+
+static const char svgZoomHeader0_noinit[] = R"svg(
+<svg id="main" version="1.1" xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" xml:space="preserve">
+)svg";
+
+static const char svgZoomHeader1[] = R"svg(
 <style type="text/css"><![CDATA[
 .node, .edge {opacity: 0.7;}
 .node.selected, .edge.selected {opacity: 1;}
@@ -120,7 +127,7 @@ static QCString replaceRef(const QCString &buf,const QCString &relPath,
   QCString href = "href";
   //bool isXLink=FALSE;
   int len = 6;
-  int indexS = buf.find("href=\""), indexE;
+  int indexS = buf.find("href=\""), indexE = 0;
   bool targetAlreadySet = buf.find("target=")!=-1;
   if (indexS>5 && buf.find("xlink:href=\"")!=-1) // XLink href (for SVG)
   {
@@ -237,7 +244,7 @@ bool DotFilePatcher::convertMapFile(TextStream &t,const QCString &mapName,
       }
 
       // strip id="..." from replBuf since the id's are not needed and not unique.
-      int indexS = replBuf.find("id=\""), indexE;
+      int indexS = replBuf.find("id=\""), indexE = 0;
       if (indexS>0 && (indexE=replBuf.find('"',indexS+4))!=-1)
       {
         t << replBuf.left(indexS-1) << replBuf.right(replBuf.length() - indexE - 1);
@@ -346,15 +353,15 @@ bool DotFilePatcher::run() const
   {
     QCString line = lineStr+'\n';
     //printf("line=[%s]\n",qPrint(line.stripWhiteSpace()));
-    int i;
+    int i = 0;
     if (isSVGFile)
     {
       if (interactiveSVG)
       {
         if (line.find("<svg")!=-1 && !replacedHeader)
         {
-          int count;
-          count = sscanf(line.data(),"<svg width=\"%dpt\" height=\"%dpt\"",&width,&height);
+          int count = sscanf(line.data(),"<svg width=\"%dpt\" height=\"%dpt\"",&width,&height);
+          if (count != 2) count = sscanf(line.data(),"<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"%d\" height=\"%d\"",&width,&height);
           //printf("width=%d height=%d\n",width,height);
           useNagivation = count==2 && (width>500 || height>450);
           insideHeader = count==2;
@@ -365,6 +372,11 @@ bool DotFilePatcher::run() const
           {
             // insert special replacement header for interactive SVGs
             t << "<!--zoomable " << height << " -->\n";
+            t << svgZoomHeader0;
+          }
+          else
+          {
+            t << svgZoomHeader0_noinit;
           }
           t << svgZoomHeader1;
           if (useNagivation)
@@ -548,6 +560,10 @@ static bool readSVGSize(const QCString &fileName,int *width,int *height)
       found=true;
     }
     else if (sscanf(line.c_str(),"<svg width=\"%dpt\" height=\"%dpt\"",width,height)==2)
+    {
+      found=true;
+    }
+    else if (sscanf(line.c_str(),"<svg xmlns=\"http://www.w3.org/2000/svg\" xmlns:xlink=\"http://www.w3.org/1999/xlink\" width=\"%d\" height=\"%d\"",width,height)==2)
     {
       found=true;
     }

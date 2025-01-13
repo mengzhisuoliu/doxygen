@@ -21,12 +21,22 @@
 #pragma warning( disable : 4242 )
 #pragma warning( disable : 4244 )
 #pragma warning( disable : 4996 )
+#pragma warning( disable : 4456 )
+#pragma warning( disable : 4805 )
 #endif
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wdeprecated-declarations"
+#pragma clang diagnostic ignored "-Wshadow"
+#endif
+#if defined(__GNUC__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wshadow"
 #endif
 #include <gunzip.hh>
+#if defined(__GNUC__)
+#pragma GCC diagnostic pop
+#endif
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #endif
@@ -147,8 +157,8 @@ bool DotRunner::readBoundingBox(const QCString &fileName,int *width,int *height,
   // helper routine to extract the bounding boxes width and height
   auto extractBoundingBox = [&fileName,&boundingBox,&width,&height](const char *s) -> bool
   {
-    int x,y;
-    double w,h;
+    int x=0, y=0;
+    double w=0, h=0;
     if (sscanf(s+boundingBox.length(),"%d %d %lf %lf",&x,&y,&w,&h)==4)
     {
       *width  = static_cast<int>(std::ceil(w));

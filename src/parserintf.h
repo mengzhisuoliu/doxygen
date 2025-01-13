@@ -23,6 +23,7 @@
 
 #include "types.h"
 #include "containers.h"
+#include "construct.h"
 
 class Entry;
 class FileDef;
@@ -40,7 +41,7 @@ class ClangTUParser;
 class OutlineParserInterface
 {
   public:
-    virtual ~OutlineParserInterface() = default;
+    ABSTRACT_BASE_CLASS(OutlineParserInterface)
 
     /** Parses a single input file with the goal to build an Entry tree.
      *  @param[in] fileName    The full name of the file.
@@ -81,7 +82,7 @@ class OutlineParserInterface
 class CodeParserInterface
 {
   public:
-    virtual ~CodeParserInterface() = default;
+    ABSTRACT_BASE_CLASS(CodeParserInterface)
 
     /** Parses a source file or fragment with the goal to produce
      *  highlighted and cross-referenced output.
@@ -89,6 +90,7 @@ class CodeParserInterface
      *  @param[in] scopeName Name of scope to which the code belongs.
      *  @param[in] input Actual code in the form of a string
      *  @param[in] lang The programming language of the code fragment.
+     *  @param[in] stripCodeComments signals whether or not for the code block the doxygen comments should be stripped.
      *  @param[in] isExampleBlock TRUE iff the code is part of an example.
      *  @param[in] exampleName Name of the example.
      *  @param[in] fileDef File definition to which the code
@@ -109,15 +111,16 @@ class CodeParserInterface
                            const QCString &scopeName,
                            const QCString &input,
                            SrcLangExt lang,
+                           bool stripCodeComments,
                            bool isExampleBlock,
                            const QCString &exampleName=QCString(),
-                           const FileDef *fileDef=0,
+                           const FileDef *fileDef=nullptr,
                            int startLine=-1,
                            int endLine=-1,
                            bool inlineFragment=FALSE,
-                           const MemberDef *memberDef=0,
+                           const MemberDef *memberDef=nullptr,
                            bool showLineNumbers=TRUE,
-                           const Definition *searchCtx=0,
+                           const Definition *searchCtx=nullptr,
                            bool collectXRefs=TRUE
                           ) = 0;
 
@@ -226,7 +229,7 @@ class ParserManager
 
     /** Gets the name of the parser associated with given \a extension.
      *  If there is no parser explicitly registered for the supplied extension,
-     *  te empty string  will be reurned.
+     *  the empty string will be returned.
      */
     QCString getParserName(const QCString &extension)
     {

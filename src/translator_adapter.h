@@ -27,7 +27,6 @@ class TranslatorAdapterBase : public Translator
              + versionString
              + ".  As a result some sentences may appear in English.\n\n";
     }
-
   public:
     /*! This method is used to generate a warning message to signal
      *  the user that the translation of his/her language of choice
@@ -36,11 +35,19 @@ class TranslatorAdapterBase : public Translator
      *
      *  \sa createUpdateNeededMessage()
      */
-    virtual QCString updateNeededMessage() = 0;
-
+    virtual QCString updateNeededMessage() override = 0;
 };
 
-class TranslatorAdapter_1_10_0 : public TranslatorAdapterBase
+class TranslatorAdapter_1_11_0 : public TranslatorAdapterBase
+{
+  public:
+    QCString updateNeededMessage() override
+    { return createUpdateNeededMessage(idLanguage(),"release 1.11.0"); }
+    QCString trImportant() override
+    { return english.trImportant(); }
+};
+
+class TranslatorAdapter_1_10_0 : public TranslatorAdapter_1_11_0
 {
   public:
     QCString updateNeededMessage() override
@@ -425,11 +432,11 @@ class TranslatorAdapter_1_7_5 : public TranslatorAdapter_1_8_0
     { return english.trFileIn(name); }
     QCString trIncludesFileIn(const QCString &name) override
     { return english.trIncludesFileIn(name); }
-    virtual QCString trDateTime(int year,int month,int day,int dayOfWeek,
+    QCString trDateTime(int year,int month,int day,int dayOfWeek,
                                 int hour,int minutes,int seconds,
                                 DateTimeType includeTime) override
     { return english.trDateTime(year,month,day,dayOfWeek,hour,minutes,seconds,includeTime); }
-    QCString trDayPeriod(int period) override
+    QCString trDayPeriod(bool period) override
     { return english.trDayPeriod(period); }
 
 };
@@ -494,7 +501,7 @@ class TranslatorAdapter_1_6_0 : public TranslatorAdapter_1_7_5
     QCString trModulesListDescription(bool extractAll) override
     { return english.trModulesListDescription(extractAll); }
 
-    virtual QCString trCompoundReferenceFortran(const QCString &clName,
+    QCString trCompoundReferenceFortran(const QCString &clName,
                                  ClassDef::CompoundType compType,
                                  bool isTemplate) override
     { return english.trCompoundReferenceFortran(clName,compType,isTemplate); }
@@ -514,7 +521,7 @@ class TranslatorAdapter_1_6_0 : public TranslatorAdapter_1_7_5
     QCString trModule(bool first_capital, bool singular) override
     { return english.trModule(first_capital,singular); }
 
-    virtual QCString trGeneratedFromFilesFortran(ClassDef::CompoundType compType,
+    QCString trGeneratedFromFilesFortran(ClassDef::CompoundType compType,
                      bool single) override
     { return english.trGeneratedFromFilesFortran(compType,single); }
 

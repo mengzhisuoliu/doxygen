@@ -67,13 +67,12 @@ void FormulaManager::initFromRepository(const QCString &dir)
     std::string readLine;
     std::string line;
     std::string prefix("\\_form#");
-    int lineNr;
     int nextLineNr=1;
     bool hasNextLine = !getline(f,readLine).fail();
     while (hasNextLine)
     {
       line = readLine;
-      lineNr = nextLineNr;
+      int lineNr = nextLineNr;
 
       // look ahead a bit because a formula can be spread over several lines
       while ((hasNextLine = !getline(f,readLine).fail()))
@@ -118,7 +117,7 @@ void FormulaManager::initFromRepository(const QCString &dir)
       }
 
       auto it = p->formulaIdMap.find(id);
-      Formula *formula=0;
+      Formula *formula=nullptr;
       if (it!=p->formulaIdMap.end()) // formula already found in a repository for another output format
       {
         formula = it->second;
@@ -134,7 +133,7 @@ void FormulaManager::initFromRepository(const QCString &dir)
       {
         //printf("formula not found adding it under id=%d\n",id);
         formula = p->formulas.add(text.c_str(),id,width,height);
-        p->formulaIdMap.insert(std::make_pair(id,formula));
+        p->formulaIdMap.emplace(id,formula);
       }
 
       if (formula) // if an entry in the repository exists also check if there is a generated image
@@ -191,6 +190,7 @@ void FormulaManager::createLatexFile(const QCString &fileName,Format format,Mode
   {
     TextStream t(&f);
     t << "\\documentclass{article}\n";
+    t << "\\usepackage{iftex}\n";
     t << "\\usepackage{ifthen}\n";
     t << "\\usepackage{epsfig}\n"; // for those who want to include images
     t << "\\usepackage[utf8]{inputenc}\n"; // looks like some older distributions with newunicode package 1.1 need this option.
@@ -698,7 +698,7 @@ int FormulaManager::addFormula(const std::string &formulaText,int width,int heig
   // add new formula
   int id = static_cast<int>(p->formulas.size());
   formula = p->formulas.add(formulaText.c_str(),id,width,height);
-  p->formulaIdMap.insert(std::make_pair(id,formula));
+  p->formulaIdMap.emplace(id,formula);
   return id;
 }
 
