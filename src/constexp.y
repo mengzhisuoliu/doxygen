@@ -26,14 +26,14 @@ int constexpYYerror(yyscan_t yyscanner, const char *s)
 {
   struct constexpYY_state* yyextra = constexpYYget_extra(yyscanner);
   warn(yyextra->constExpFileName.c_str(), yyextra->constExpLineNr,
-       "preprocessing issue while doing constant expression evaluation: %s:\n    input='%s'\n    doxygen interpretation '%s'",
-       s,yyextra->orgString.c_str(),yyextra->inputString.c_str());
+       "preprocessing issue while doing constant expression evaluation: {}:\n    input='{}'\n    doxygen interpretation '{}'",
+       s,yyextra->orgString,yyextra->inputString);
   return 0;
 }
 
 %}
 
-%name-prefix "constexpYY"
+%define api.prefix {constexpYY}
 %define api.pure full
 %lex-param {yyscan_t yyscanner}
 %parse-param {yyscan_t yyscanner}
@@ -74,6 +74,7 @@ int constexpYYerror(yyscan_t yyscanner, const char *s)
 start: constant_expression
        {
          struct constexpYY_state* yyextra = constexpYYget_extra(yyscanner);
+         /* dummy statement to silence a 'set but not used' compiler warning */ (void)yynerrs;
          yyextra->resultValue = $1; return 0;
        }
 ;

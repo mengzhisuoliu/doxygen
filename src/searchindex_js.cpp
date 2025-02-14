@@ -110,29 +110,21 @@ static void splitSearchTokens(QCString &title,IntVector &indices)
     }
   }
   if (di>0 && title.at(di-1)==' ') di--; // strip trailing whitespace
-  title.resize(di+1);
+  title.resize(di);
 
   // create a list of start positions within title for
   // each unique word in order of appearance
-  int p=0,i;
-  StringSet wordsFound;
+  int p=0,i=0;
   while ((i=title.find(' ',p))!=-1)
   {
     std::string word = title.mid(p,i-p).str();
-    if (wordsFound.find(word)==wordsFound.end())
-    {
-      indices.push_back(p);
-      wordsFound.insert(word);
-    }
+    indices.push_back(p);
     p = i+1;
   }
   if (p<static_cast<int>(title.length()))
   {
     std::string word = title.mid(p).str();
-    if (wordsFound.find(word)==wordsFound.end())
-    {
-      indices.push_back(p);
-    }
+    indices.push_back(p);
   }
 }
 
@@ -198,13 +190,13 @@ static void addMemberToSearchIndex(const MemberDef *md)
 {
   bool hideFriendCompounds = Config_getBool(HIDE_FRIEND_COMPOUNDS);
   bool isLinkable = md->isLinkable();
-  const ClassDef *cd=0;
-  const NamespaceDef *nd=0;
-  const FileDef *fd=0;
-  const GroupDef *gd=0;
+  const ClassDef *cd=nullptr;
+  const NamespaceDef *nd=nullptr;
+  const FileDef *fd=nullptr;
+  const GroupDef *gd=nullptr;
   if (isLinkable &&
       (
-       ((cd=md->getClassDef()) && cd->isLinkable() && cd->templateMaster()==0) ||
+       ((cd=md->getClassDef()) && cd->isLinkable() && !cd->isImplicitTemplateInstance()) ||
        ((gd=md->getGroupDef()) && gd->isLinkable())
       )
      )
@@ -340,7 +332,7 @@ void createJavaScriptSearchIndex()
           g_searchIndexInfo[SEARCH_INDEX_CLASSES].add(SearchTerm(n,cd.get()));
         }
       }
-      else // non slice optimisation: group all types under classes
+      else // non slice optimization: group all types under classes
       {
         g_searchIndexInfo[SEARCH_INDEX_CLASSES].add(SearchTerm(n,cd.get()));
       }
@@ -363,7 +355,7 @@ void createJavaScriptSearchIndex()
   {
     if (cd->isLinkable())
     {
-      QCString n = cd->name();
+      QCString n = cd->localName();
       g_searchIndexInfo[SEARCH_INDEX_ALL].add(SearchTerm(n,cd.get()));
       g_searchIndexInfo[SEARCH_INDEX_CONCEPTS].add(SearchTerm(n,cd.get()));
     }
@@ -425,7 +417,7 @@ void createJavaScriptSearchIndex()
   {
     if (gd->isLinkable())
     {
-      QCString title(convertUTF8ToLower(filterTitle(gd->groupTitle()).str()));
+      QCString title(filterTitle(gd->groupTitle()).str());
       IntVector tokenIndices;
       splitSearchTokens(title,tokenIndices);
       for (int index : tokenIndices)
@@ -441,7 +433,7 @@ void createJavaScriptSearchIndex()
   {
     if (pd->isLinkable())
     {
-      QCString title(convertUTF8ToLower(filterTitle(pd->title()).str()));
+      QCString title(filterTitle(pd->title()).str());
       IntVector tokenIndices;
       splitSearchTokens(title,tokenIndices);
       for (int index : tokenIndices)
@@ -455,7 +447,7 @@ void createJavaScriptSearchIndex()
   // main page
   if (Doxygen::mainPage)
   {
-    QCString title(convertUTF8ToLower(filterTitle(Doxygen::mainPage->title()).str()));
+    QCString title(filterTitle(Doxygen::mainPage->title()).str());
     IntVector tokenIndices;
     splitSearchTokens(title,tokenIndices);
     for (int index : tokenIndices)
@@ -490,13 +482,13 @@ void createJavaScriptSearchIndex()
       //
       // `std::stable_sort` is used here due to reproducibility issues
       // on key collisions
-      // https://github.com/doxygen/doxygen/issues/10445 
+      // https://github.com/doxygen/doxygen/issues/10445
       std::stable_sort(symList.begin(),
                 symList.end(),
                 [](const auto &t1,const auto &t2)
                 {
-                  int    eq =    qstricmp(t1.word,t2.word);             // search term first
-                  return eq==0 ? qstricmp(t1.title,t2.title)<0 : eq<0;  // then full title
+                  int    eq =    qstricmp_sort(t1.word,t2.word);             // search term first
+                  return eq==0 ? qstricmp_sort(t1.title,t2.title)<0 : eq<0;  // then full title
                 });
     }
   }
@@ -587,7 +579,7 @@ static void writeJavasScriptSearchDataPage(const QCString &baseName,const QCStri
   std::ofstream ti = Portable::openOutputStream(dataFileName);
   if (!ti.is_open())
   {
-    err("Failed to open file '%s' for writing...\n",qPrint(dataFileName));
+    err("Failed to open file '{}' for writing...\n",dataFileName);
     return;
   }
 
@@ -608,7 +600,7 @@ static void writeJavasScriptSearchDataPage(const QCString &baseName,const QCStri
 
   int childCount=0;
   QCString lastWord;
-  const Definition *prevScope = 0;
+  const Definition *prevScope = nullptr;
   for (auto it = list.begin(); it!=list.end();)
   {
     const SearchTerm &term = *it;
@@ -644,7 +636,7 @@ static void writeJavasScriptSearchDataPage(const QCString &baseName,const QCStri
       }
       ti << "',[";
       childCount=0;
-      prevScope=0;
+      prevScope=nullptr;
     }
 
     if (childCount>0)
@@ -680,7 +672,7 @@ static void writeJavasScriptSearchDataPage(const QCString &baseName,const QCStri
       else if (md)
       {
         const FileDef *fd = md->getBodyDef();
-        if (fd==0) fd = md->getFileDef();
+        if (fd==nullptr) fd = md->getFileDef();
         if (fd)
         {
           ti << "'" << convertToXML(fd->localName()) << "'";
@@ -694,7 +686,7 @@ static void writeJavasScriptSearchDataPage(const QCString &baseName,const QCStri
     else // multiple entries with the same name
     {
       bool found=FALSE;
-      bool overloadedFunction = ((prevScope!=0 && scope==prevScope) || (scope && scope==nextScope)) &&
+      bool overloadedFunction = ((prevScope!=nullptr && scope==prevScope) || (scope && scope==nextScope)) &&
                                  md && md->isCallable();
       QCString prefix;
       if (md) prefix=convertToXML(md->localName());
@@ -718,12 +710,12 @@ static void writeJavasScriptSearchDataPage(const QCString &baseName,const QCStri
           case Definition::TypePage:      name = convertToXML(filterTitle(toPageDef(d)->title()));                found=true; break;
           case Definition::TypeGroup:     name = convertToXML(filterTitle(toGroupDef(d)->groupTitle()));          found=true; break;
           default:
-            if (scope==0 || scope==Doxygen::globalScope) // in global scope
+            if (scope==nullptr || scope==Doxygen::globalScope) // in global scope
             {
               if (md)
               {
                 const FileDef *fd = md->getBodyDef();
-                if (fd==0) fd = md->resolveAlias()->getFileDef();
+                if (fd==nullptr) fd = md->resolveAlias()->getFileDef();
                 if (fd)
                 {
                   if (!prefix.isEmpty()) prefix+=":&#160;";
@@ -839,7 +831,7 @@ void writeJavaScriptSearchIndex()
 
 void SearchIndexInfo::add(const SearchTerm &term)
 {
-  std::string letter = getUTF8CharAt(term.word.str(),0);
+  std::string letter = convertUTF8ToLower(getUTF8CharAt(term.word.str(),0));
   auto &list = symbolMap[letter]; // creates a new entry if not found
   list.push_back(term);
 }

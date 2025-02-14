@@ -73,20 +73,20 @@ struct pycodeYY_state
   QCString      curClassName;
   StringVector  curClassBases;
 
-  OutputCodeList * code = 0;
-  const char *  inputString = 0;     //!< the code fragment as text
+  OutputCodeList * code = nullptr;
+  const char *  inputString = nullptr;     //!< the code fragment as text
   int           inputPosition = 0;   //!< read offset during parsing
   QCString      fileName;
-  const char *  currentFontClass = 0;
+  const char *  currentFontClass = nullptr;
   bool          insideCodeLine = FALSE;
-  const Definition *searchCtx = 0;
+  const Definition *searchCtx = nullptr;
   bool          collectXRefs = FALSE;
   int           inputLines = 0;      //!< number of line in the code fragment
   int           yyLineNr = 0;        //!< current line number
   std::unique_ptr<FileDef> exampleFileDef;
-  const FileDef *    sourceFileDef = 0;
-  const Definition * currentDefinition = 0;
-  const MemberDef *  currentMemberDef = 0;
+  const FileDef *    sourceFileDef = nullptr;
+  const Definition * currentDefinition = nullptr;
+  const MemberDef *  currentMemberDef = nullptr;
   bool          includeCodeFragment = FALSE;
   QCString      realScope;
   int           bodyCurlyCount = 0;
@@ -105,6 +105,7 @@ struct pycodeYY_state
   bool          doubleQuote = FALSE;
   bool          noSuiteFound = FALSE;
   int           stringContext = 0;
+  bool          insideSpecialComment = false;
 
   std::stack<yy_size_t> indents;  //!< Tracks indentation levels for scoping in python
 
@@ -129,8 +130,8 @@ static void codify(yyscan_t yyscanner,const QCString &text);
 static void endCodeLine(yyscan_t yyscanner);
 static void nextCodeLine(yyscan_t yyscanner);
 static void writeMultiLineCodeLink(yyscan_t yyscanner, OutputCodeList &ol, const Definition *d, const QCString &text);
-static void startFontClass(yyscan_t yyscanner,const char *s);
-static void endFontClass(yyscan_t yyscanner);
+static void startFontClass(yyscan_t yyscanner,const char *s,bool specialComment=false);
+static void endFontClass(yyscan_t yyscanner,bool specialComment=false);
 static void codifyLines(yyscan_t yyscanner,const QCString &text);
 static bool getLinkInScope(yyscan_t yyscanner, const QCString &c, const QCString &m,
                            const QCString &memberText, OutputCodeList &ol, const QCString &text);
@@ -173,12 +174,10 @@ DIGIT             [0-9]
 LETTER            [A-Za-z\x80-\xFF]
 NONEMPTY          [A-Za-z0-9_\x80-\xFF]
 EXPCHAR           [#(){}\[\],:.%/\\=`*~|&<>!;+-]
-NONEMPTYEXP       [^ \t\n:]
 PARAMNONEMPTY     [^ \t\n():]
 IDENTIFIER        ({LETTER}|"_")({LETTER}|{DIGIT}|"_")*
 SCOPE             {IDENTIFIER}("."{IDENTIFIER})*
 CALLANY           "("[^)\n]*")"
-BORDER            ([^A-Za-z0-9])
 
 POUNDCOMMENT      "##"
 
@@ -190,89 +189,9 @@ LONGSTRINGITEM    ({LONGSTRINGCHAR}|{ESCAPESEQ})
 SMALLQUOTE        ("\"\""|"\""|"'"|"''")
 LONGSTRINGBLOCK   ({LONGSTRINGITEM}|{SMALLQUOTE})
 
-SHORTSTRING       ("'"{SHORTSTRINGITEM}*"'"|'"'{SHORTSTRINGITEM}*'"')
-SHORTSTRINGITEM   ({SHORTSTRINGCHAR}|{ESCAPESEQ})
-SHORTSTRINGCHAR   [^\\\n"]
-STRINGLITERAL     {STRINGPREFIX}?( {SHORTSTRING} | {LONGSTRING})
 STRINGPREFIX      ("r"|"u"|"ur"|"R"|"U"|"UR"|"Ur"|"uR")
 KEYWORD           ("lambda"|"import"|"class"|"assert"|"with"|"as"|"from"|"global"|"async"|"def"|"True"|"False")
 FLOWKW            ("or"|"and"|"is"|"not"|"print"|"for"|"in"|"if"|"try"|"except"|"yield"|"raise"|"break"|"continue"|"pass"|"if"|"return"|"while"|"elif"|"else"|"finally")
-QUOTES            ("\""[^"]*"\"")
-SINGLEQUOTES      ("'"[^']*"'")
-
-LONGINTEGER       {INTEGER}("l"|"L")
-INTEGER           ({DECIMALINTEGER}|{OCTINTEGER}|{HEXINTEGER})
-DECIMALINTEGER    ({NONZERODIGIT}{DIGIT}*|"0")
-OCTINTEGER        "0"{OCTDIGIT}+
-HEXINTEGER        "0"("x"|"X"){HEXDIGIT}+
-NONZERODIGIT      [1-9]
-OCTDIGIT          [0-7]
-HEXDIGIT          ({DIGIT}|[a-f]|[A-F])
-FLOATNUMBER       ({POINTFLOAT}|{EXPONENTFLOAT})
-POINTFLOAT        ({INTPART}?{FRACTION}|{INTPART}".")
-EXPONENTFLOAT     ({INTPART}|{POINTFLOAT}){EXPONENT}
-INTPART           {DIGIT}+
-FRACTION          "."{DIGIT}+
-EXPONENT          ("e"|"E")("+"|"-")?{DIGIT}+
-IMAGNUMBER        ({FLOATNUMBER}|{INTPART})("j"|"J")
-ATOM              ({IDENTIFIER}|{LITERAL}|{ENCLOSURE})
-ENCLOSURE         ({PARENTH_FORM}|{LIST_DISPLAY}|{DICT_DISPLAY}|{STRING_CONVERSION})
-LITERAL           ({STRINGLITERAL}|{INTEGER}|{LONGINTEGER}|{FLOATNUMBER}|{IMAGNUMBER})
-PARENTH_FORM      "("{EXPRESSION_LIST}?")"
-TEST              ({AND_TEST}("or"{AND_TEST})*|{LAMBDA_FORM})
-TESTLIST          {TEST}( ","{TEST})*","?
-LIST_DISPLAY      "["{LISTMAKER}?"]"
-LISTMAKER         {EXPRESSION}({LIST_FOR}|(","{EXPRESSION})*","?)
-LIST_ITER         ({LIST_FOR}|{LIST_IF})
-LIST_FOR          "for"{EXPRESSION_LIST}"in"{TESTLIST}{LIST_ITER}?
-LIST_IF           "if"{TEST}{LIST_ITER}?
-DICT_DISPLAY      "\{"{KEY_DATUM_LIST}?"\}"
-KEY_DATUM_LIST    {KEY_DATUM}(","{KEY_DATUM})*","?
-KEY_DATUM         {EXPRESSION}":"{EXPRESSION}
-STRING_CONVERSION "`"{EXPRESSION_LIST}"`"
-PRIMARY           ({ATOM}|{ATTRIBUTEREF}|{SUBSCRIPTION}|{SLICING}|{CALL})
-ATTRIBUTEREF      {PRIMARY}"."{IDENTIFIER}
-SUBSCRIPTION      {PRIMARY}"["{EXPRESSION_LIST}"]"
-SLICING           ({SIMPLE_SLICING}|{EXTENDED_SLICING})
-SIMPLE_SLICING    {PRIMARY}"["{SHORT_SLICE}"]"
-EXTENDED_SLICING  {PRIMARY}"["{SLICE_LIST}"]"
-SLICE_LIST        {SLICE_ITEM}(","{SLICE_ITEM})*","?
-SLICE_ITEM        ({EXPRESSION}|{PROPER_SLICE}|{ELLIPSIS})
-PROPER_SLICE      ({SHORT_SLICE}|{LONG_SLICE})
-SHORT_SLICE       {LOWER_BOUND}?":"{UPPER_BOUND}?
-LONG_SLICE        {SHORT_SLICE}":"{STRIDE}?
-LOWER_BOUND       {EXPRESSION}
-UPPER_BOUND       {EXPRESSION}
-STRIDE            {EXPRESSION}
-ELLIPSIS          "..."
-CALL              {PRIMARY}"("({ARGUMENT_LIST}","?)?")"
-ARGUMENT_LIST     ({POSITIONAL_ARGUMENTS}(","{KEYWORD_ARGUMENTS})?(",""*"{EXPRESSION})?(",""**"{EXPRESSION})?|{KEYWORD_ARGUMENTS}(",""*"{EXPRESSION})?(",""**"{EXPRESSION})?|"*"{EXPRESSION}(",""**"{EXPRESSION})?|"**"{EXPRESSION})
-POSITIONAL_ARGUMENTS  {EXPRESSION}(","{EXPRESSION})*
-KEYWORD_ARGUMENTS     {KEYWORD_ITEM}(","{KEYWORD_ITEM})*
-KEYWORD_ITEM      {IDENTIFIER}"="{EXPRESSION}
-POWER             {PRIMARY}("**"{U_EXPR})?
-U_EXPR            ({POWER}|"-"{U_EXPR}|"+"{U_EXPR}|"\~"{U_EXPR})
-M_EXPR            ({U_EXPR}|{M_EXPR}"*"{U_EXPR}|{M_EXPR}"/""/"{U_EXPR}|{M_EXPR}"/"{U_EXPR}|{M_EXPR}"\%"{U_EXPR})
-A_EXPR            ({M_EXPR}|{A_EXPR}"+"{M_EXPR}|{A_EXPR}"-"{M_EXPR}
-SHIFT_EXPR        ({A_EXPR}|{SHIFT_EXPR}("<<"|">>"){A_EXPR})
-AND_EXPR          ({SHIFT_EXPR}|{AND_EXPR}"\;SPMamp;"{SHIFT_EXPR}
-XOR_EXPR          ({AND_EXPR}|{XOR_EXPR}"\textasciicircum"{AND_EXPR})
-OR_EXPR           ({XOR_EXPR}|{OR_EXPR}"|"{ XOR_EXPR})
-
-COMPARISON        {OR_EXPR}({COMP_OPERATOR}{OR_EXPR})*
-COMP_OPERATOR     ("<"|">"|"=="|">="|"<="|"<>"|"!="|"is""not"?|"not"?"in")
-EXPRESSION        ({OR_TEST}|{LAMBDA_FORM})
-OR_TEST           ({AND_TEST}|{OR_TEST}"or"{AND_TEST})
-AND_TEST          ({NOT_TEST}|{AND_TEST}"and"{NOT_TEST})
-NOT_TEST          ({COMPARISON}|"not"{NOT_TEST})
-LAMBDA_FORM       "lambda"{PARAMETER_LIST}?":"{EXPRESSION}
-EXPRESSION_LIST   {EXPRESSION}(","{EXPRESSION})*","?
-SIMPLE_STMT       ({EXPRESSION_STMT}|{ASSERT_STMT}|{ASSIGNMENT_STMT}|{AUGMENTED_ASSIGNMENT_STMT}|{PASS_STMT}|{DEL_STMT}|{PRINT_STMT}|{RETURN_STMT}|{YIELD_STMT}|{RAISE_STMT}|{BREAK_STMT}|{CONTINUE_STMT}|{IMPORT_STMT}|{GLOBAL_STMT}|{EXEC_STMT})
-EXPRESSION_STMT   {EXPRESSION_LIST}
-ASSERT_STMT       "assert"{EXPRESSION}(","{EXPRESSION})?
-ASSIGNMENT_STMT   ({TARGET_LIST}"=")+{EXPRESSION_LIST}
-TARGET_LIST       {TARGET}(","{TARGET})*","?
-TARGET            ({IDENTIFIER}|"("{TARGET_LIST}")"|"["{TARGET_LIST}"]"|{ATTRIBUTEREF}|{SUBSCRIPTION}|{SLICING})
 
 %option noyywrap
 %option stack
@@ -388,7 +307,7 @@ TARGET            ({IDENTIFIER}|"("{TARGET_LIST}")"|"["{TARGET_LIST}"]"|{ATTRIBU
                                       // probably be more strict
                                       // about what to accept.
 
-                                      yyextra->curClassBases.push_back(yytext);
+                                      yyextra->curClassBases.emplace_back(yytext);
                                       yyextra->insideBody = true;
                                       generateClassOrGlobalLink(yyscanner,*yyextra->code,yytext);
                                       yyextra->insideBody = false;
@@ -407,7 +326,7 @@ TARGET            ({IDENTIFIER}|"("{TARGET_LIST}")"|"["{TARGET_LIST}"]"|{ATTRIBU
                                       ScopedTypeVariant var(yyextra->curClassName);
                                       for (const auto &s : yyextra->curClassBases)
                                       {
-                                        const ClassDef *baseDefToAdd = 0;
+                                        const ClassDef *baseDefToAdd = nullptr;
                                         // find class in the local scope
                                         auto it = yyextra->codeClassMap.find(s);
                                         if (it != yyextra->codeClassMap.end())
@@ -415,7 +334,7 @@ TARGET            ({IDENTIFIER}|"("{TARGET_LIST}")"|"["{TARGET_LIST}"]"|{ATTRIBU
                                           baseDefToAdd = toClassDef(it->second.globalDef());
                                         }
                                         // Try to find class in global scope
-                                        if (baseDefToAdd==0)
+                                        if (baseDefToAdd==nullptr)
                                         {
                                           baseDefToAdd=yyextra->symbolResolver.resolveClass(yyextra->currentDefinition,s.c_str(),true);
                                         }
@@ -425,10 +344,10 @@ TARGET            ({IDENTIFIER}|"("{TARGET_LIST}")"|"["{TARGET_LIST}"]"|{ATTRIBU
                                           var.localDef()->insertBaseClass(baseDefToAdd->name());
                                         }
                                       }
-                                      yyextra->codeClassMap.emplace(std::make_pair(yyextra->curClassName.str(),std::move(var)));
+                                      yyextra->codeClassMap.emplace(yyextra->curClassName.str(),std::move(var));
 
                                       // Reset class-parsing variables.
-                                      yyextra->curClassName.resize(0);
+                                      yyextra->curClassName.clear();
                                       yyextra->curClassBases.clear();
 
                                       yyextra->noSuiteFound = TRUE;
@@ -747,17 +666,9 @@ TARGET            ({IDENTIFIER}|"("{TARGET_LIST}")"|"["{TARGET_LIST}"]"|{ATTRIBU
                                     }
 <DocBlock>{NEWLINE}                 { // comment block ends at the end of this line
                                       // remove special comment (default config)
-                                      if (Config_getBool(STRIP_CODE_COMMENTS))
-                                      {
-                                        yyextra->yyLineNr+=((QCString)yyextra->docBlock).contains('\n');
-                                        yyextra->endComment=TRUE;
-                                      }
-                                      else // do not remove comment
-                                      {
-                                        startFontClass(yyscanner,"comment");
-                                        codifyLines(yyscanner,yyextra->docBlock);
-                                        endFontClass(yyscanner);
-                                      }
+                                      startFontClass(yyscanner,"comment",true);
+                                      codifyLines(yyscanner,yyextra->docBlock);
+                                      endFontClass(yyscanner,true);
                                       unput(*yytext);
                                       pop_state(yyscanner);
                                     }
@@ -811,11 +722,11 @@ TARGET            ({IDENTIFIER}|"("{TARGET_LIST}")"|"["{TARGET_LIST}"]"|{ATTRIBU
                                   }
 
 <*><<EOF>>                        {
-                                    if (YY_START==DocBlock && !Config_getBool(STRIP_CODE_COMMENTS))
+                                    if (YY_START==DocBlock)
                                     {
-                                      startFontClass(yyscanner,"comment");
+                                      startFontClass(yyscanner,"comment",true);
                                       codifyLines(yyscanner,yyextra->docBlock);
-                                      endFontClass(yyscanner);
+                                      endFontClass(yyscanner,true);
                                     }
                                     yyterminate();
                                   }
@@ -889,7 +800,7 @@ static void adjustScopesAndSuites(yyscan_t yyscanner,unsigned indentLength)
       // printf("Exited scope indent of [%d]\n", yyextra->indents.top());
       yyextra->indents.pop(); // Pop the old suite's indentation
 
-      yyextra->currentMemberDef=0;
+      yyextra->currentMemberDef=nullptr;
       if (yyextra->currentDefinition)
         yyextra->currentDefinition=yyextra->currentDefinition->getOuterScope();
     }
@@ -913,7 +824,7 @@ static int countLines(yyscan_t yyscanner)
 {
   struct yyguts_t *yyg = (struct yyguts_t*)yyscanner;
   const char *p=yyextra->inputString;
-  char c;
+  char c=0;
   int count=1;
   while ((c=*p))
   {
@@ -933,15 +844,15 @@ static int countLines(yyscan_t yyscanner)
 static void setCurrentDoc(yyscan_t yyscanner, const QCString &anchor)
 {
   struct yyguts_t *yyg = (struct yyguts_t*)yyscanner;
-  if (Doxygen::searchIndex)
+  if (Doxygen::searchIndex.enabled())
   {
     if (yyextra->searchCtx)
     {
-      Doxygen::searchIndex->setCurrentDoc(yyextra->searchCtx,yyextra->searchCtx->anchor(),FALSE);
+      Doxygen::searchIndex.setCurrentDoc(yyextra->searchCtx,yyextra->searchCtx->anchor(),FALSE);
     }
     else
     {
-      Doxygen::searchIndex->setCurrentDoc(yyextra->sourceFileDef,anchor,TRUE);
+      Doxygen::searchIndex.setCurrentDoc(yyextra->sourceFileDef,anchor,TRUE);
     }
   }
 }
@@ -950,9 +861,9 @@ static void setCurrentDoc(yyscan_t yyscanner, const QCString &anchor)
 
 static void addToSearchIndex(yyscan_t /* yyscanner */, const QCString &text)
 {
-  if (Doxygen::searchIndex)
+  if (Doxygen::searchIndex.enabled())
   {
-    Doxygen::searchIndex->addWord(text,FALSE);
+    Doxygen::searchIndex.addWord(text,FALSE);
   }
 }
 
@@ -968,12 +879,12 @@ static const ClassDef *stripClassName(yyscan_t yyscanner,const QCString &s,Defin
   while (extractClassNameFromType(type,pos,className,templSpec)!=-1)
   {
     QCString clName=className+templSpec;
-    const ClassDef *cd=0;
+    const ClassDef *cd=nullptr;
     if (!yyextra->classScope.isEmpty())
     {
       cd=yyextra->symbolResolver.resolveClass(d,yyextra->classScope+"::"+clName,true);
     }
-    if (cd==0)
+    if (cd==nullptr)
     {
       cd=yyextra->symbolResolver.resolveClass(d,clName,true);
     }
@@ -983,7 +894,7 @@ static const ClassDef *stripClassName(yyscan_t yyscanner,const QCString &s,Defin
     }
   }
 
-  return 0;
+  return nullptr;
 }
 
 //-------------------------------------------------------------------------------
@@ -1163,7 +1074,7 @@ static void writeMultiLineCodeLink(yyscan_t yyscanner,
   while (!done)
   {
     const char *sp=p;
-    char c;
+    char c=0;
     while ((c=*p++) && c!='\n') { }
     if (c=='\n')
     {
@@ -1183,12 +1094,16 @@ static void writeMultiLineCodeLink(yyscan_t yyscanner,
 
 //-------------------------------------------------------------------------------
 
-static void startFontClass(yyscan_t yyscanner,const char *s)
+static void startFontClass(yyscan_t yyscanner,const char *s,bool specialComment)
 {
   struct yyguts_t *yyg = (struct yyguts_t*)yyscanner;
+  if (specialComment)
+  {
+    yyextra->code->startSpecialComment();
+    yyextra->insideSpecialComment = true;
+  }
   // if font class is already set don't stop and start it.
-  // strcmp does not like null pointers as input.
-  if (!yyextra->currentFontClass || !s || strcmp(yyextra->currentFontClass,s))
+  if (qstrcmp(yyextra->currentFontClass,s)!=0)
   {
     endFontClass(yyscanner);
     yyextra->code->startFontClass(s);
@@ -1198,13 +1113,18 @@ static void startFontClass(yyscan_t yyscanner,const char *s)
 
 //-------------------------------------------------------------------------------
 
-static void endFontClass(yyscan_t yyscanner)
+static void endFontClass(yyscan_t yyscanner,bool specialComment)
 {
   struct yyguts_t *yyg = (struct yyguts_t*)yyscanner;
   if (yyextra->currentFontClass)
   {
     yyextra->code->endFontClass();
-    yyextra->currentFontClass=0;
+    yyextra->currentFontClass=nullptr;
+  }
+  if (specialComment && yyextra->insideSpecialComment)
+  {
+    yyextra->code->endSpecialComment();
+    yyextra->insideSpecialComment=false;
   }
 }
 
@@ -1216,7 +1136,7 @@ static void codifyLines(yyscan_t yyscanner,const QCString &text)
   if (text.isEmpty()) return;
   //printf("codifyLines(%d,\"%s\")\n",yyextra->yyLineNr,text);
   const char *p=text.data(),*sp=p;
-  char c;
+  char c=0;
   bool done=FALSE;
   while (!done)
   {
@@ -1225,12 +1145,9 @@ static void codifyLines(yyscan_t yyscanner,const QCString &text)
     if (c=='\n')
     {
       yyextra->yyLineNr++;
-      int l = (int)(p-sp-1);
-      char *tmp = (char*)malloc(l+1);
-      memcpy(tmp,sp,l);
-      tmp[l]='\0';
-      yyextra->code->codify(tmp);
-      free(tmp);
+      size_t l = static_cast<size_t>(p-sp-1);
+      std::string tmp(sp,l);
+      yyextra->code->codify(tmp.c_str());
       nextCodeLine(yyscanner);
     }
     else
@@ -1257,7 +1174,7 @@ static bool getLinkInScope(yyscan_t yyscanner,
   input.insideCode = true;
   GetDefResult result = getDefs(input);
   //printf("Trying '%s'::'%s'\n",qPrint(c),qPrint(m));
-  if (result.found && result.md->isLinkable())
+  if (result.found && result.md && result.md->isLinkable())
   {
     const Definition *d = result.md->getOuterScope()==Doxygen::globalScope ?
                           result.md->getBodyDef() : result.md->getOuterScope();
@@ -1326,12 +1243,12 @@ static void generateClassOrGlobalLink(yyscan_t yyscanner,
 
   DBG_CTX((stderr,"generateClassOrGlobalLink(className=%s)\n",qPrint(className)));
 
-  const ScopedTypeVariant *lcd = 0;
-  const ClassDef *cd=0;             // Class def that we may find 
-  const MemberDef *md=0;            // Member def that we may find 
+  const ScopedTypeVariant *lcd = nullptr;
+  const ClassDef *cd=nullptr;             // Class def that we may find 
+  const MemberDef *md=nullptr;            // Member def that we may find 
   //bool isLocal=FALSE;
 
-  if ((lcd=yyextra->theVarContext.findVariable(className))==0) // not a local variable
+  if ((lcd=yyextra->theVarContext.findVariable(className))==nullptr) // not a local variable
   {
     const Definition *d = yyextra->currentDefinition;
     QCString scope = substitute(className,".","::");
@@ -1344,7 +1261,7 @@ static void generateClassOrGlobalLink(yyscan_t yyscanner,
         yyextra->currentDefinition?qPrint(yyextra->currentDefinition->displayName()):"<null>"));
     DBG_CTX((stderr,"is found as a type %s\n",cd?qPrint(cd->name()):"<null>"));
 
-    if (cd==0 && md==0) // also see if it is variable or enum or enum value
+    if (cd==nullptr && md==nullptr) // also see if it is variable or enum or enum value
     {
       const NamespaceDef *nd = getResolvedNamespace(scope);
       if (nd)
@@ -1545,17 +1462,16 @@ static void findMemberLink(yyscan_t yyscanner,
   //    yyextra->currentDefinition?qPrint(yyextra->currentDefinition->name()):"<none>",
   //    yyextra->currentMemberDef?qPrint(yyextra->currentMemberDef->name()):"<none>"
   //    );
-  bool found = false;
   if (yyextra->currentDefinition)
   {
-    auto v = Doxygen::symbolMap->find(symName);
-    for (auto p : v)
+    const auto &v = Doxygen::symbolMap->find(symName);
+    for (const auto &p : v)
     {
-      if (findMemberLink(yyscanner,ol,p,symName)) found = true;
+      if (findMemberLink(yyscanner,ol,p,symName)) return;
     }
   }
   //printf("sym %s not found\n",&yytext[5]);
-  if (!found) codify(yyscanner,symName);
+  codify(yyscanner,symName);
 }
 
 static void incrementFlowKeyWordCount(yyscan_t yyscanner)
@@ -1599,8 +1515,8 @@ void PythonCodeParser::resetCodeParserState()
 {
   struct yyguts_t *yyg = (struct yyguts_t*)p->yyscanner;
   yyextra->codeClassMap.clear();
-  yyextra->currentDefinition = 0;
-  yyextra->currentMemberDef = 0;
+  yyextra->currentDefinition = nullptr;
+  yyextra->currentMemberDef = nullptr;
   yyextra->doubleStringIsDoc = FALSE;
   yyextra->paramParens = 0;
   while (!yyextra->indents.empty()) yyextra->indents.pop();
@@ -1611,6 +1527,7 @@ void PythonCodeParser::parseCode(OutputCodeList &codeOutIntf,
     const QCString &/* scopeName */,
     const QCString &input,
     SrcLangExt /*lang*/,
+    bool stripCodeComments,
     bool isExampleBlock,
     const QCString &exampleName,
     const FileDef *fileDef,
@@ -1628,13 +1545,14 @@ void PythonCodeParser::parseCode(OutputCodeList &codeOutIntf,
 
   //printf("***parseCode(%s)\n",qPrint(input));
 
+  codeOutIntf.stripCodeComments(stripCodeComments);
   if (input.isEmpty()) return;
-  DebugLex debugLex(Debug::Lex_pycode, __FILE__, fileDef ? qPrint(fileDef->fileName()): NULL);
+  DebugLex debugLex(Debug::Lex_pycode, __FILE__, fileDef ? qPrint(fileDef->fileName()): nullptr);
   yyextra->fileName      = fileDef ? fileDef->fileName():"";
   yyextra->code = &codeOutIntf;
   yyextra->inputString   = input.data();
   yyextra->inputPosition = 0;
-  yyextra->currentFontClass = 0;
+  yyextra->currentFontClass = nullptr;
   yyextra->insideCodeLine = FALSE;
   yyextra->searchCtx=searchCtx;
   yyextra->collectXRefs=collectXRefs;
@@ -1653,8 +1571,9 @@ void PythonCodeParser::parseCode(OutputCodeList &codeOutIntf,
   yyextra->sourceFileDef = fileDef;
   yyextra->symbolResolver.setFileScope(fileDef);
   yyextra->foldStack.clear();
+  yyextra->insideSpecialComment = false;
 
-  if (yyextra->exampleBlock && fileDef==0)
+  if (yyextra->exampleBlock && fileDef==nullptr)
   {
     // create a dummy filedef for the example
     yyextra->exampleFileDef = createFileDef("",(!exampleName.isEmpty()?qPrint(exampleName):"generated"));
@@ -1669,7 +1588,7 @@ void PythonCodeParser::parseCode(OutputCodeList &codeOutIntf,
   // Starts line 1 on the output
   startCodeLine(yyscanner);
 
-  pycodeYYrestart(0,yyscanner);
+  pycodeYYrestart(nullptr,yyscanner);
 
   pycodeYYlex(yyscanner);
 
@@ -1694,7 +1613,7 @@ void PythonCodeParser::parseCode(OutputCodeList &codeOutIntf,
   {
     // delete the temporary file definition used for this example
     yyextra->exampleFileDef.reset();
-    yyextra->sourceFileDef=0;
+    yyextra->sourceFileDef=nullptr;
   }
   // write the tooltips
   yyextra->tooltipManager.writeTooltips(codeOutIntf);
@@ -1704,7 +1623,7 @@ static inline void pop_state(yyscan_t yyscanner)
 {
   struct yyguts_t *yyg = (struct yyguts_t*)yyscanner;
   if ( yyg->yy_start_stack_ptr <= 0 )
-    warn(yyextra->fileName,yyextra->yyLineNr,"Unexpected statement '%s'",yytext );
+    warn(yyextra->fileName,yyextra->yyLineNr,"Unexpected statement '{}'",yytext );
   else
     yy_pop_state(yyscanner);
 }

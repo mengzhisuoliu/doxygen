@@ -54,7 +54,7 @@ static QCString filterId(const QCString &s)
   GrowBuf growBuf;
   growBuf.clear();
   const char *p=s.data();
-  char c;
+  char c=0;
   while ((c=*p++))
   {
     switch (c)
@@ -81,6 +81,28 @@ static bool supportedHtmlAttribute(const QCString &name)
           name=="width" ||
           name=="tabstyle" ||
           name=="title");
+}
+
+static QCString makeShortName(const QCString &baseName)
+{
+  QCString result = baseName;
+  int i = result.findRev('/');
+  if (i!=-1)
+  {
+    result=result.mid(i+1);
+  }
+  return result;
+}
+
+static QCString makeBaseName(const QCString &name)
+{
+  QCString result = makeShortName(name);
+  int i = result.find('.');
+  if (i!=-1)
+  {
+    result=result.left(i);
+  }
+  return result;
 }
 
 
@@ -159,11 +181,6 @@ DocbookDocVisitor::DocbookDocVisitor(TextStream &t,OutputCodeList &ci,const QCSt
 DB_VIS_C
   // m_t << "<section>\n";
 }
-DocbookDocVisitor::~DocbookDocVisitor()
-{
-DB_VIS_C
-  // m_t << "</section>\n";
-}
 
 //--------------------------------------
 // visitor functions for leaf nodes
@@ -210,7 +227,7 @@ DB_VIS_C
   }
   else
   {
-    err("DocBook: non supported HTML-entity found: %s\n",HtmlEntityMapper::instance().html(s.symbol(),TRUE));
+    err("DocBook: non supported HTML-entity found: {}\n",HtmlEntityMapper::instance().html(s.symbol(),TRUE));
   }
 }
 
@@ -270,6 +287,7 @@ DB_VIS_C
     case DocStyleChange::Italic:
       if (s.enable()) m_t << "<emphasis>";     else m_t << "</emphasis>";
       break;
+    case DocStyleChange::Kbd:
     case DocStyleChange::Code:
       if (s.enable()) m_t << "<computeroutput>";   else m_t << "</computeroutput>";
       break;
@@ -326,6 +344,7 @@ DB_VIS_C
       getCodeParser(m_langExt).parseCode(m_ci,s.context(),
                                          s.text(),
                                          langExt,
+                                         Config_getBool(STRIP_CODE_COMMENTS),
                                          s.isExample(),
                                          s.exampleFile());
       m_t << "</computeroutput></literallayout>";
@@ -359,7 +378,7 @@ DB_VIS_C
     case DocVerbatim::Dot:
       {
         static int dotindex = 1;
-        QCString baseName(4096);
+        QCString baseName(4096, QCString::ExplicitSize);
         QCString name;
         QCString stext = s.text();
         m_t << "<para>\n";
@@ -372,7 +391,7 @@ DB_VIS_C
         std::ofstream file = Portable::openOutputStream(fileName);
         if (!file.is_open())
         {
-          err("Could not open file %s for writing\n",qPrint(fileName));
+          err("Could not open file {} for writing\n",fileName);
         }
         file.write( stext.data(), stext.length() );
         file.close();
@@ -384,7 +403,7 @@ DB_VIS_C
     case DocVerbatim::Msc:
       {
         static int mscindex = 1;
-        QCString baseName(4096);
+        QCString baseName(4096, QCString::ExplicitSize);
         QCString name;
         QCString stext = s.text();
         m_t << "<para>\n";
@@ -397,7 +416,7 @@ DB_VIS_C
         std::ofstream file = Portable::openOutputStream(fileName);
         if (!file.is_open())
         {
-          err("Could not open file %s for writing\n",qPrint(fileName));
+          err("Could not open file {} for writing\n",fileName);
         }
         QCString text = "msc {";
         text+=stext;
@@ -414,13 +433,8 @@ DB_VIS_C
         QCString docbookOutput = Config_getString(DOCBOOK_OUTPUT);
         QCString baseName = PlantumlManager::instance().writePlantUMLSource(docbookOutput,
             s.exampleFile(),s.text(),PlantumlManager::PUML_BITMAP,
-            s.engine(),s.srcFile(),s.srcLine());
-        QCString shortName = baseName;
-        int i;
-        if ((i=shortName.findRev('/'))!=-1)
-        {
-          shortName=shortName.right(shortName.length()-i-1);
-        }
+            s.engine(),s.srcFile(),s.srcLine(),true);
+        QCString shortName = makeShortName(baseName);
         m_t << "<para>\n";
         writePlantUMLFile(baseName,s);
         m_t << "</para>\n";
@@ -451,6 +465,7 @@ DB_VIS_C
         getCodeParser(inc.extension()).parseCode(m_ci,inc.context(),
                                                   inc.text(),
                                                   langExt,
+                                                  inc.stripCodeComments(),
                                                   inc.isExample(),
                                                   inc.exampleFile(), fd.get());
         m_t << "</computeroutput></literallayout>";
@@ -461,6 +476,7 @@ DB_VIS_C
       getCodeParser(inc.extension()).parseCode(m_ci,inc.context(),
                                                 inc.text(),
                                                 langExt,
+                                                inc.stripCodeComments(),
                                                 inc.isExample(),
                                                 inc.exampleFile());
       m_t << "</computeroutput></literallayout>";
@@ -482,7 +498,6 @@ DB_VIS_C
       m_t << "</literallayout>";
       break;
     case DocInclude::Snippet:
-    case DocInclude::SnippetTrimLeft:
     case DocInclude::SnippetWithLines:
       m_t << "<literallayout><computeroutput>";
       CodeFragmentManager::instance().parseCodeFragment(m_ci,
@@ -490,7 +505,8 @@ DB_VIS_C
                                           inc.blockId(),
                                           inc.context(),
                                           inc.type()==DocInclude::SnippetWithLines,
-                                          inc.type()==DocInclude::SnippetTrimLeft
+                                          inc.trimLeft(),
+                                          inc.stripCodeComments()
                                          );
       m_t << "</computeroutput></literallayout>";
       break;
@@ -525,13 +541,15 @@ DB_VIS_C
       }
 
       getCodeParser(locLangExt).parseCode(m_ci,op.context(),
-                                        op.text(),langExt,op.isExample(),
+                                        op.text(),langExt,
+                                        op.stripCodeComments(),
+                                        op.isExample(),
                                         op.exampleFile(),
                                         fd.get(),     // fileDef
                                         op.line(),    // startLine
                                         -1,    // endLine
                                         FALSE, // inline fragment
-                                        0,     // memberDef
+                                        nullptr,     // memberDef
                                         op.showLineNo()  // show line numbers
                                        );
     }
@@ -619,7 +637,19 @@ void DocbookDocVisitor::operator()(const DocAutoListItem &li)
 {
 DB_VIS_C
   if (m_hide) return;
-  m_t << "<listitem>";
+  switch (li.itemNumber())
+  {
+    case DocAutoList::Unchecked: // unchecked
+      m_t << "<listitem override=\"unchecked\">";
+      break;
+    case DocAutoList::Checked_x: // checked with x
+    case DocAutoList::Checked_X: // checked with X
+      m_t << "<listitem override=\"checked\">";
+      break;
+    default:
+      m_t << "<listitem>";
+      break;
+  }
   visitChildren(li);
   m_t << "</listitem>";
 }
@@ -798,6 +828,16 @@ DB_VIS_C
         m_t << "<caution><title>" << convertToDocBook(theTranslator->trAttention()) << "</title>\n";
       }
       break;
+    case DocSimpleSect::Important:
+      if (m_insidePre)
+      {
+        m_t << "<important><title>" << theTranslator->trImportant() << "</title>\n";
+      }
+      else
+      {
+        m_t << "<important><title>" << convertToDocBook(theTranslator->trImportant()) << "</title>\n";
+      }
+      break;
     case DocSimpleSect::User:
     case DocSimpleSect::Rcs:
     case DocSimpleSect::Unknown:
@@ -829,6 +869,9 @@ DB_VIS_C
       break;
     case DocSimpleSect::Attention:
       m_t << "</caution>\n";
+      break;
+    case DocSimpleSect::Important:
+      m_t << "</important>\n";
       break;
     case DocSimpleSect::Warning:
       m_t << "</warning>\n";
@@ -876,12 +919,10 @@ DB_VIS_C
   m_t << "<section xml:id=\"_" <<  stripPath(s.file());
   if (!s.anchor().isEmpty()) m_t << "_1" << s.anchor();
   m_t << "\">\n";
-  m_t << "<title>";
   if (s.title())
   {
     std::visit(*this,*s.title());
   }
-  m_t << "</title>\n";
   visitChildren(s);
   m_t << "</section>\n";
 }
@@ -916,7 +957,7 @@ DB_VIS_C
     {
       if (opt.name=="value")
       {
-        bool ok;
+        bool ok = false;
         int val = opt.value.toInt(&ok);
         if (ok) value = val;
       }
@@ -941,7 +982,7 @@ DB_VIS_C
         }
         else if (value==0 && opt.name=="start")
         {
-          bool ok;
+          bool ok = false;
           int val = opt.value.toInt(&ok);
           if (ok) value = val;
         }
@@ -980,7 +1021,7 @@ DB_VIS_C
   if (m_hide) return;
   m_t << "<varlistentry><term>";
   visitChildren(dt);
-  m_t << "</term>\n";
+  m_t << "</term></varlistentry>\n";
 }
 
 void DocbookDocVisitor::operator()(const DocHtmlDescData &dd)
@@ -989,7 +1030,7 @@ DB_VIS_C
   if (m_hide) return;
   m_t << "<listitem>";
   visitChildren(dd);
-  m_t << "</listitem></varlistentry>\n";
+  m_t << "</listitem>\n";
 }
 
 void DocbookDocVisitor::operator()(const DocHtmlTable &t)
@@ -1185,17 +1226,12 @@ DB_VIS_C
   {
     if (m_hide) return;
     m_t << "\n";
-    QCString baseName=img.name();
-    int i;
-    if ((i=baseName.findRev('/'))!=-1 || (i=baseName.findRev('\\'))!=-1)
-    {
-      baseName=baseName.right(baseName.length()-i-1);
-    }
+    QCString baseName=makeShortName(img.name());
     visitPreStart(m_t, img.children(), img.hasCaption(), img.relPath() + baseName, img.width(), img.height(), img.isInlineImage());
     visitChildren(img);
     visitPostEnd(m_t, img.hasCaption(),img.isInlineImage());
     QCString file;
-    bool ambig;
+    bool ambig = false;
     FileDef *fd=findFileDef(Doxygen::imageNameLinkedMap, baseName, ambig);
     if (fd)
     {
@@ -1213,7 +1249,7 @@ void DocbookDocVisitor::operator()(const DocDotFile &df)
 DB_VIS_C
   if (m_hide) return;
   if (!Config_getBool(DOT_CLEANUP)) copyFile(df.file(),Config_getString(DOCBOOK_OUTPUT)+"/"+stripPath(df.file()));
-  startDotFile(df.file(),df.width(),df.height(),df.hasCaption(),df.children(),df.srcFile(),df.srcLine());
+  startDotFile(df.file(),df.relPath(),df.width(),df.height(),df.hasCaption(),df.children(),df.srcFile(),df.srcLine());
   visitChildren(df);
   endDotFile(df.hasCaption());
 }
@@ -1223,7 +1259,7 @@ void DocbookDocVisitor::operator()(const DocMscFile &df)
 DB_VIS_C
   if (m_hide) return;
   if (!Config_getBool(DOT_CLEANUP)) copyFile(df.file(),Config_getString(DOCBOOK_OUTPUT)+"/"+stripPath(df.file()));
-  startMscFile(df.file(),df.width(),df.height(),df.hasCaption(),df.children(),df.srcFile(),df.srcLine());
+  startMscFile(df.file(),df.relPath(),df.width(),df.height(),df.hasCaption(),df.children(),df.srcFile(),df.srcLine());
   visitChildren(df);
   endMscFile(df.hasCaption());
 }
@@ -1233,9 +1269,19 @@ void DocbookDocVisitor::operator()(const DocDiaFile &df)
 DB_VIS_C
   if (m_hide) return;
   if (!Config_getBool(DOT_CLEANUP)) copyFile(df.file(),Config_getString(DOCBOOK_OUTPUT)+"/"+stripPath(df.file()));
-  startDiaFile(df.file(),df.width(),df.height(),df.hasCaption(),df.children(),df.srcFile(),df.srcLine());
+  startDiaFile(df.file(),df.relPath(),df.width(),df.height(),df.hasCaption(),df.children(),df.srcFile(),df.srcLine());
   visitChildren(df);
   endDiaFile(df.hasCaption());
+}
+
+void DocbookDocVisitor::operator()(const DocPlantUmlFile &df)
+{
+DB_VIS_C
+  if (m_hide) return;
+  if (!Config_getBool(DOT_CLEANUP)) copyFile(df.file(),Config_getString(DOCBOOK_OUTPUT)+"/"+stripPath(df.file()));
+  startPlantUmlFile(df.file(),df.relPath(),df.width(),df.height(),df.hasCaption(),df.children(),df.srcFile(),df.srcLine());
+  visitChildren(df);
+  endPlantUmlFile(df.hasCaption());
 }
 
 void DocbookDocVisitor::operator()(const DocLink &lnk)
@@ -1483,14 +1529,9 @@ DB_VIS_C
 void DocbookDocVisitor::writeMscFile(const QCString &baseName, const DocVerbatim &s)
 {
 DB_VIS_C
-  QCString shortName = baseName;
-  int i;
-  if ((i=shortName.findRev('/'))!=-1)
-  {
-    shortName=shortName.right(shortName.length()-i-1);
-  }
+  QCString shortName = makeShortName(baseName);
   QCString outDir = Config_getString(DOCBOOK_OUTPUT);
-  writeMscGraphFromFile(baseName+".msc",outDir,shortName,MSC_BITMAP,s.srcFile(),s.srcLine());
+  writeMscGraphFromFile(baseName+".msc",outDir,shortName,MscOutputFormat::BITMAP,s.srcFile(),s.srcLine());
   visitPreStart(m_t, s.children(), s.hasCaption(), s.relPath() + shortName + ".png", s.width(), s.height());
   visitCaption(s.children());
   visitPostEnd(m_t, s.hasCaption());
@@ -1499,20 +1540,15 @@ DB_VIS_C
 void DocbookDocVisitor::writePlantUMLFile(const QCString &baseName, const DocVerbatim &s)
 {
 DB_VIS_C
-  QCString shortName = baseName;
-  int i;
-  if ((i=shortName.findRev('/'))!=-1)
-  {
-    shortName=shortName.right(shortName.length()-i-1);
-  }
+  QCString shortName = makeShortName(baseName);
   QCString outDir = Config_getString(DOCBOOK_OUTPUT);
   PlantumlManager::instance().generatePlantUMLOutput(baseName,outDir,PlantumlManager::PUML_BITMAP);
   visitPreStart(m_t, s.children(), s.hasCaption(), s.relPath() + shortName + ".png", s.width(),s.height());
   visitCaption(s.children());
   visitPostEnd(m_t, s.hasCaption());
 }
-
-void DocbookDocVisitor::startMscFile(const QCString &fileName,
+void DocbookDocVisitor::startPlantUmlFile(const QCString &fileName,
+    const QCString &relPath,
     const QCString &width,
     const QCString &height,
     bool hasCaption,
@@ -1522,21 +1558,43 @@ void DocbookDocVisitor::startMscFile(const QCString &fileName,
     )
 {
 DB_VIS_C
-  QCString baseName=fileName;
-  int i;
-  if ((i=baseName.findRev('/'))!=-1)
-  {
-    baseName=baseName.right(baseName.length()-i-1);
-  }
-  if ((i=baseName.find('.'))!=-1)
-  {
-    baseName=baseName.left(i);
-  }
+  QCString outDir = Config_getString(DOCBOOK_OUTPUT);
+  std::string inBuf;
+  readInputFile(fileName,inBuf);
+  QCString baseName = PlantumlManager::instance().writePlantUMLSource(outDir,
+            QCString(),inBuf.c_str(),PlantumlManager::PUML_BITMAP,QCString(),srcFile,srcLine,false);
+  baseName=makeBaseName(baseName);
+  PlantumlManager::instance().generatePlantUMLOutput(baseName,outDir,PlantumlManager::PUML_BITMAP);
+  m_t << "<para>\n";
+  visitPreStart(m_t, children, hasCaption, relPath + baseName + ".png",  width,  height);
+}
+
+void DocbookDocVisitor::endPlantUmlFile(bool hasCaption)
+{
+DB_VIS_C
+  if (m_hide) return;
+  m_t << "\n";
+  visitPostEnd(m_t, hasCaption);
+  m_t << "</para>\n";
+}
+
+void DocbookDocVisitor::startMscFile(const QCString &fileName,
+    const QCString &relPath,
+    const QCString &width,
+    const QCString &height,
+    bool hasCaption,
+    const DocNodeList &children,
+    const QCString &srcFile,
+    int srcLine
+    )
+{
+DB_VIS_C
+  QCString baseName=makeBaseName(fileName);
   baseName.prepend("msc_");
   QCString outDir = Config_getString(DOCBOOK_OUTPUT);
-  writeMscGraphFromFile(fileName,outDir,baseName,MSC_BITMAP,srcFile,srcLine);
+  writeMscGraphFromFile(fileName,outDir,baseName,MscOutputFormat::BITMAP,srcFile,srcLine);
   m_t << "<para>\n";
-  visitPreStart(m_t, children, hasCaption, baseName + ".png",  width,  height);
+  visitPreStart(m_t, children, hasCaption, relPath + baseName + ".png",  width,  height);
 }
 
 void DocbookDocVisitor::endMscFile(bool hasCaption)
@@ -1550,20 +1608,16 @@ DB_VIS_C
 void DocbookDocVisitor::writeDiaFile(const QCString &baseName, const DocVerbatim &s)
 {
 DB_VIS_C
-  QCString shortName = baseName;
-  int i;
-  if ((i=shortName.findRev('/'))!=-1)
-  {
-    shortName=shortName.right(shortName.length()-i-1);
-  }
+  QCString shortName = makeShortName(baseName);
   QCString outDir = Config_getString(DOCBOOK_OUTPUT);
-  writeDiaGraphFromFile(baseName+".dia",outDir,shortName,DIA_BITMAP,s.srcFile(),s.srcLine());
+  writeDiaGraphFromFile(baseName+".dia",outDir,shortName,DiaOutputFormat::BITMAP,s.srcFile(),s.srcLine());
   visitPreStart(m_t, s.children(), s.hasCaption(), shortName, s.width(),s.height());
   visitCaption(s.children());
   visitPostEnd(m_t, s.hasCaption());
 }
 
 void DocbookDocVisitor::startDiaFile(const QCString &fileName,
+    const QCString &relPath,
     const QCString &width,
     const QCString &height,
     bool hasCaption,
@@ -1573,21 +1627,12 @@ void DocbookDocVisitor::startDiaFile(const QCString &fileName,
     )
 {
 DB_VIS_C
-  QCString baseName=fileName;
-  int i;
-  if ((i=baseName.findRev('/'))!=-1)
-  {
-    baseName=baseName.right(baseName.length()-i-1);
-  }
-  if ((i=baseName.find('.'))!=-1)
-  {
-    baseName=baseName.left(i);
-  }
+  QCString baseName=makeBaseName(fileName);
   baseName.prepend("dia_");
   QCString outDir = Config_getString(DOCBOOK_OUTPUT);
-  writeDiaGraphFromFile(fileName,outDir,baseName,DIA_BITMAP,srcFile,srcLine);
+  writeDiaGraphFromFile(fileName,outDir,baseName,DiaOutputFormat::BITMAP,srcFile,srcLine);
   m_t << "<para>\n";
-  visitPreStart(m_t, children, hasCaption, baseName + ".png",  width,  height);
+  visitPreStart(m_t, children, hasCaption, relPath + baseName + ".png",  width,  height);
 }
 
 void DocbookDocVisitor::endDiaFile(bool hasCaption)
@@ -1601,20 +1646,16 @@ DB_VIS_C
 void DocbookDocVisitor::writeDotFile(const QCString &baseName, const DocVerbatim &s)
 {
 DB_VIS_C
-  QCString shortName = baseName;
-  int i;
-  if ((i=shortName.findRev('/'))!=-1)
-  {
-    shortName=shortName.right(shortName.length()-i-1);
-  }
+  QCString shortName = makeShortName(baseName);
   QCString outDir = Config_getString(DOCBOOK_OUTPUT);
-  writeDotGraphFromFile(baseName+".dot",outDir,shortName,GOF_BITMAP,s.srcFile(),s.srcLine());
+  writeDotGraphFromFile(baseName+".dot",outDir,shortName,GraphOutputFormat::BITMAP,s.srcFile(),s.srcLine());
   visitPreStart(m_t, s.children(), s.hasCaption(), s.relPath() + shortName + "." + getDotImageExtension(), s.width(),s.height());
   visitCaption(s.children());
   visitPostEnd(m_t, s.hasCaption());
 }
 
 void DocbookDocVisitor::startDotFile(const QCString &fileName,
+    const QCString &relPath,
     const QCString &width,
     const QCString &height,
     bool hasCaption,
@@ -1624,22 +1665,13 @@ void DocbookDocVisitor::startDotFile(const QCString &fileName,
     )
 {
 DB_VIS_C
-  QCString baseName=fileName;
-  int i;
-  if ((i=baseName.findRev('/'))!=-1)
-  {
-    baseName=baseName.right(baseName.length()-i-1);
-  }
-  if ((i=baseName.find('.'))!=-1)
-  {
-    baseName=baseName.left(i);
-  }
+  QCString baseName=makeBaseName(fileName);
   baseName.prepend("dot_");
   QCString outDir = Config_getString(DOCBOOK_OUTPUT);
   QCString imgExt = getDotImageExtension();
-  writeDotGraphFromFile(fileName,outDir,baseName,GOF_BITMAP,srcFile,srcLine);
+  writeDotGraphFromFile(fileName,outDir,baseName,GraphOutputFormat::BITMAP,srcFile,srcLine);
   m_t << "<para>\n";
-  visitPreStart(m_t, children, hasCaption, baseName + "." + imgExt,  width,  height);
+  visitPreStart(m_t, children, hasCaption, relPath + baseName + "." + imgExt,  width,  height);
 }
 
 void DocbookDocVisitor::endDotFile(bool hasCaption)

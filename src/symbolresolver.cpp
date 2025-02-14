@@ -16,6 +16,7 @@
 #include <unordered_map>
 #include <string>
 #include <vector>
+#include <cassert>
 
 #include "symbolresolver.h"
 #include "util.h"
@@ -36,6 +37,18 @@
 
 static std::mutex g_cacheMutex;
 static std::recursive_mutex g_cacheTypedefMutex;
+
+static std::mutex g_substMapMutex;
+static std::unordered_map<std::string, std::pair<QCString,const MemberDef *> > g_substMap;
+
+//--------------------------------------------------------------------------------------
+
+static bool isCodeSymbol(Definition::DefType defType)
+{
+  return defType==Definition::TypeClass   || defType==Definition::TypeNamespace ||
+         defType==Definition::TypeModule  || defType==Definition::TypeMember    ||
+         defType==Definition::TypePackage || defType==Definition::TypeConcept;
+}
 
 //--------------------------------------------------------------------------------------
 
@@ -90,7 +103,9 @@ class AccessStack
 
 //--------------------------------------------------------------------------------------
 
-using VisitedNamespaces = std::unordered_map<std::string,const Definition *>;
+using VisitedKeys          = StringVector;
+using VisitedNamespaceKeys = StringVector;
+using VisitedNamespaces    = std::unordered_map<std::string,const Definition *>;
 
 //--------------------------------------------------------------------------------------
 
@@ -101,9 +116,9 @@ struct SymbolResolver::Private
     void reset()
     {
       m_resolvedTypedefs.clear();
-      resolvedType.resize(0);
-      typeDef = 0;
-      templateSpec.resize(0);
+      resolvedType.clear();
+      typeDef = nullptr;
+      templateSpec.clear();
     }
     void setFileScope(const FileDef *fileScope)
     {
@@ -111,11 +126,11 @@ struct SymbolResolver::Private
     }
 
     QCString          resolvedType;
-    const MemberDef  *typeDef = 0;
+    const MemberDef  *typeDef = nullptr;
     QCString          templateSpec;
 
     const ClassDef *getResolvedTypeRec(
-                           StringUnorderedSet &visitedKeys, // in
+                           VisitedKeys &visitedKeys, // in
                            const Definition *scope,     // in
                            const QCString &n,           // in
                            const MemberDef **pTypeDef,  // out
@@ -123,7 +138,7 @@ struct SymbolResolver::Private
                            QCString *pResolvedType);    // out
 
     const Definition *getResolvedSymbolRec(
-                           StringUnorderedSet &visitedKeys, // in
+                           VisitedKeys &visitedKeys, // in
                            const Definition *scope,     // in
                            const QCString &n,           // in
                            const QCString &args,        // in
@@ -133,13 +148,13 @@ struct SymbolResolver::Private
                            QCString *pTemplSpec,        // out
                            QCString *pResolvedType);    // out
 
-    int isAccessibleFrom(  StringUnorderedSet &visitedKeys, // in
+    int isAccessibleFrom(  VisitedKeys &visitedKeys, // in
                            AccessStack &accessStack,
                            const Definition *scope,
                            const Definition *item);
 
     int isAccessibleFromWithExpScope(
-                           StringUnorderedSet &visitedKeys,                     // in
+                           VisitedKeys &visitedKeys,                     // in
                            VisitedNamespaces &visitedNamespaces,
                            AccessStack       &accessStack,
                            const Definition *scope,
@@ -147,11 +162,11 @@ struct SymbolResolver::Private
                            const QCString &explicitScopePart);
 
   private:
-    void getResolvedType(  StringUnorderedSet &visitedKeys,
+    void getResolvedType(  VisitedKeys &visitedKeys,
                            const Definition *scope,                             // in
                            const Definition *d,                                 // in
                            const QCString &explicitScopePart,                   // in
-                           const std::unique_ptr<ArgumentList> &actTemplParams, // in
+                           const ArgumentList *actTemplParams,                  // in
                            int &minDistance,                                    // input
                            const ClassDef *&bestMatch,                          // out
                            const MemberDef *&bestTypedef,                       // out
@@ -159,13 +174,14 @@ struct SymbolResolver::Private
                            QCString &bestResolvedType                           // out
                         );
 
-    void getResolvedSymbol(StringUnorderedSet &visitedKeys,                     // in
+    void getResolvedSymbol(VisitedKeys &visitedKeys,                            // in
                            const Definition *scope,                             // in
                            const Definition *d,                                 // in
                            const QCString &args,                                // in
                            bool  checkCV,                                       // in
                            bool insideCode,                                     // in
                            const QCString &explicitScopePart,                   // in
+                           const QCString &strippedTemplateParams,              // in
                            bool forceCallable,                                  // in
                            int &minDistance,                                    // inout
                            const Definition *&bestMatch,                        // out
@@ -175,34 +191,34 @@ struct SymbolResolver::Private
                           );
 
     const ClassDef *newResolveTypedef(
-                           StringUnorderedSet &visitedKeys,                     // in
+                           VisitedKeys &visitedKeys,                            // in
                            const Definition *scope,                             // in
                            const MemberDef *md,                                 // in
                            const MemberDef **pMemType,                          // out
                            QCString *pTemplSpec,                                // out
                            QCString *pResolvedType,                             // out
-                           const std::unique_ptr<ArgumentList> &actTemplParams = std::unique_ptr<ArgumentList>()
+                           const ArgumentList *actTemplParams = nullptr
                           );
 
-    const Definition *followPath(StringUnorderedSet &visitedKeys,
+    const Definition *followPath(VisitedKeys &visitedKeys,
                                  const Definition *start,const QCString &path);
 
-    const Definition *endOfPathIsUsedClass(const LinkedRefMap<ClassDef> &cl,const QCString &localName);
+    const Definition *endOfPathIsUsedClass(const LinkedRefMap<const Definition> &dl,const QCString &localName);
 
-    bool accessibleViaUsingNamespace(StringUnorderedSet &visitedKeys,
-                                     StringUnorderedSet &visitedNamespaces,
+    bool accessibleViaUsingNamespace(VisitedKeys &visitedKeys,
+                                     VisitedNamespaceKeys &visitedNamespaces,
                                      const LinkedRefMap<NamespaceDef> &nl,
                                      const Definition *item,
                                      const QCString &explicitScopePart="",
                                      int level=0);
-    bool accessibleViaUsingClass(StringUnorderedSet &visitedKeys,
-                                 const LinkedRefMap<ClassDef> &cl,
+    bool accessibleViaUsingDefinition(VisitedKeys &visitedKeys,
+                                 const LinkedRefMap<const Definition> &dl,
                                  const Definition *item,
                                  const QCString &explicitScopePart=""
                                 );
-    QCString substTypedef(StringUnorderedSet &visitedKeys,
+    QCString substTypedef(VisitedKeys &visitedKeys,
                           const Definition *scope,const QCString &name,
-                          const MemberDef **pTypeDef=0);
+                          const MemberDef **pTypeDef=nullptr);
 
     const FileDef    *m_fileScope;
     std::unordered_map<std::string,const MemberDef*> m_resolvedTypedefs;
@@ -211,18 +227,19 @@ struct SymbolResolver::Private
 
 
 const ClassDef *SymbolResolver::Private::getResolvedTypeRec(
-           StringUnorderedSet &visitedKeys,
+           VisitedKeys &visitedKeys,
            const Definition *scope,
            const QCString &n,
            const MemberDef **pTypeDef,
            QCString *pTemplSpec,
            QCString *pResolvedType)
 {
-  AUTO_TRACE("scope={} name={}",scope?scope->name():QCString(),n);
-  if (n.isEmpty()) return 0;
+  AUTO_TRACE("scope={} name={}",scope->name(),n);
+  if (n.isEmpty()) return nullptr;
   QCString explicitScopePart;
   QCString strippedTemplateParams;
-  QCString name=stripTemplateSpecifiersFromScope(n,TRUE,&strippedTemplateParams);
+  QCString scopeName=scope!=Doxygen::globalScope ? scope->name() : QCString();
+  QCString name=stripTemplateSpecifiersFromScope(n,TRUE,&strippedTemplateParams,scopeName);
   std::unique_ptr<ArgumentList> actTemplParams;
   if (!strippedTemplateParams.isEmpty()) // template part that was stripped
   {
@@ -236,26 +253,26 @@ const ClassDef *SymbolResolver::Private::getResolvedTypeRec(
     // split off the explicit scope part
     explicitScopePart=name.left(qualifierIndex);
     // todo: improve namespace alias substitution
-    replaceNamespaceAliases(explicitScopePart,explicitScopePart.length());
+    replaceNamespaceAliases(explicitScopePart);
     name=name.mid(qualifierIndex+2);
   }
 
   if (name.isEmpty())
   {
     AUTO_TRACE_EXIT("empty name");
-    return 0; // empty name
+    return nullptr; // empty name
   }
 
   auto &range = Doxygen::symbolMap->find(name);
   if (range.empty())
   {
     AUTO_TRACE_EXIT("no symbol with this name");
-    return 0;
+    return nullptr;
   }
 
   bool hasUsingStatements =
     (m_fileScope && (!m_fileScope->getUsedNamespaces().empty() ||
-                     !m_fileScope->getUsedClasses().empty())
+                     !m_fileScope->getUsedDefinitions().empty())
     );
   // Since it is often the case that the same name is searched in the same
   // scope over an over again (especially for the linked source code generation)
@@ -263,14 +280,14 @@ const ClassDef *SymbolResolver::Private::getResolvedTypeRec(
   // result of a lookup is deterministic. As the key we use the concatenated
   // scope, the name to search for and the explicit scope prefix. The speedup
   // achieved by this simple cache can be enormous.
-  int scopeNameLen = scope->name().length()+1;
-  int nameLen = name.length()+1;
-  int explicitPartLen = explicitScopePart.length();
-  int fileScopeLen = hasUsingStatements ? 1+m_fileScope->absFilePath().length() : 0;
+  size_t scopeNameLen = scope->name().length()+1;
+  size_t nameLen = name.length()+1;
+  size_t explicitPartLen = explicitScopePart.length();
+  size_t fileScopeLen = hasUsingStatements ? 1+m_fileScope->absFilePath().length() : 0;
 
   // below is a more efficient coding of
   // QCString key=scope->name()+"+"+name+"+"+explicitScopePart+args+typesOnly?'T':'F';
-  QCString key(scopeNameLen+nameLen+explicitPartLen+fileScopeLen+1);
+  QCString key(scopeNameLen+nameLen+explicitPartLen+fileScopeLen, QCString::ExplicitSize);
   char *pk=key.rawData();
   qstrcpy(pk,scope->name().data()); *(pk+scopeNameLen-1)='+';
   pk+=scopeNameLen;
@@ -293,19 +310,19 @@ const ClassDef *SymbolResolver::Private::getResolvedTypeRec(
   }
   *pk='\0';
 
-  const ClassDef *bestMatch=0;
+  const ClassDef *bestMatch=nullptr;
   {
-    if (visitedKeys.find(key.str())!=visitedKeys.end())
+    if (std::find(visitedKeys.begin(),visitedKeys.end(),key.str())!=std::end(visitedKeys))
     {
       // we are already in the middle of find the definition for this key.
       // avoid recursion
       AUTO_TRACE_EXIT("recursion detected");
-      return 0;
+      return nullptr;
     }
     // remember the key
-    visitedKeys.insert(key.str());
+    visitedKeys.push_back(key.str());
 
-    LookupInfo *pval = 0;
+    LookupInfo *pval = nullptr;
     {
       std::lock_guard lock(g_cacheMutex);
       pval = Doxygen::typeLookupCache->find(key.str());
@@ -325,15 +342,18 @@ const ClassDef *SymbolResolver::Private::getResolvedTypeRec(
       return toClassDef(pval->definition);
     }
 
-    const MemberDef *bestTypedef=0;
+    const MemberDef *bestTypedef=nullptr;
     QCString bestTemplSpec;
     QCString bestResolvedType;
     int minDistance=10000; // init at "infinite"
 
     for (Definition *d : range)
     {
-      getResolvedType(visitedKeys,scope,d,explicitScopePart,actTemplParams,
-          minDistance,bestMatch,bestTypedef,bestTemplSpec,bestResolvedType);
+      if (isCodeSymbol(d->definitionType()))
+      {
+        getResolvedType(visitedKeys,scope,d,explicitScopePart,actTemplParams.get(),
+            minDistance,bestMatch,bestTypedef,bestTemplSpec,bestResolvedType);
+      }
       if  (minDistance==0) break; // we can stop reaching if we already reached distance 0
     }
 
@@ -355,7 +375,7 @@ const ClassDef *SymbolResolver::Private::getResolvedTypeRec(
       Doxygen::typeLookupCache->insert(key.str(),
                             LookupInfo(bestMatch,bestTypedef,bestTemplSpec,bestResolvedType));
     }
-    visitedKeys.erase(key.str());
+    visitedKeys.erase(std::remove(visitedKeys.begin(), visitedKeys.end(), key.str()), visitedKeys.end());
 
     AUTO_TRACE_EXIT("found name={} templSpec={} typeDef={} resolvedTypedef={}",
         bestMatch?bestMatch->name():QCString(),
@@ -367,7 +387,7 @@ const ClassDef *SymbolResolver::Private::getResolvedTypeRec(
 }
 
 const Definition *SymbolResolver::Private::getResolvedSymbolRec(
-           StringUnorderedSet &visitedKeys,
+           VisitedKeys &visitedKeys,
            const Definition *scope,
            const QCString &n,
            const QCString &args,
@@ -378,11 +398,12 @@ const Definition *SymbolResolver::Private::getResolvedSymbolRec(
            QCString *pResolvedType)
 {
   AUTO_TRACE("scope={} name={} args={} checkCV={} insideCode={}",
-      scope?scope->name():QCString(),n,args,checkCV,insideCode);
-  if (n.isEmpty()) return 0;
+      scope->name(),n,args,checkCV,insideCode);
+  if (n.isEmpty()) return nullptr;
   QCString explicitScopePart;
   QCString strippedTemplateParams;
-  QCString name=stripTemplateSpecifiersFromScope(n,TRUE,&strippedTemplateParams);
+  QCString scopeName=scope!=Doxygen::globalScope ? scope->name() : QCString();
+  QCString name=stripTemplateSpecifiersFromScope(n,TRUE,&strippedTemplateParams,scopeName);
   std::unique_ptr<ArgumentList> actTemplParams;
   if (!strippedTemplateParams.isEmpty()) // template part that was stripped
   {
@@ -396,39 +417,31 @@ const Definition *SymbolResolver::Private::getResolvedSymbolRec(
     // split off the explicit scope part
     explicitScopePart=name.left(qualifierIndex);
     // todo: improve namespace alias substitution
-    replaceNamespaceAliases(explicitScopePart,explicitScopePart.length());
+    replaceNamespaceAliases(explicitScopePart);
     name=name.mid(qualifierIndex+2);
   }
+  AUTO_TRACE_ADD("qualifierIndex={} name={} explicitScopePart={} strippedTemplateParams={}",
+                 qualifierIndex,name,explicitScopePart,strippedTemplateParams);
 
   if (name.isEmpty())
   {
     AUTO_TRACE_EXIT("empty name qualifierIndex={}",qualifierIndex);
-    return 0; // empty name
+    return nullptr; // empty name
   }
 
-  auto &range = Doxygen::symbolMap->find(name);
+  int i=0;
+  const auto &range1 = Doxygen::symbolMap->find(name);
+  const auto &range  = (range1.empty() && (i=name.find('<'))!=-1) ? Doxygen::symbolMap->find(name.left(i)) : range1;
   if (range.empty())
   {
-    int i;
-    if (insideCode && (i=name.find('<'))!=-1)
-    {
-      range = Doxygen::symbolMap->find(name.left(i));
-      if (range.empty())
-      {
-        AUTO_TRACE_ADD("no symbols (including unspecialized)");
-        return 0;
-      }
-    }
-    else
-    {
-      AUTO_TRACE_ADD("no symbols");
-      return 0;
-    }
+    AUTO_TRACE_ADD("no symbols with name '{}' (including unspecialized)",name);
+    return nullptr;
   }
+  AUTO_TRACE_ADD("{} -> {} candidates",name,range.size());
 
   bool hasUsingStatements =
     (m_fileScope && (!m_fileScope->getUsedNamespaces().empty() ||
-                     !m_fileScope->getUsedClasses().empty())
+                     !m_fileScope->getUsedDefinitions().empty())
     );
   // Since it is often the case that the same name is searched in the same
   // scope over an over again (especially for the linked source code generation)
@@ -436,22 +449,26 @@ const Definition *SymbolResolver::Private::getResolvedSymbolRec(
   // result of a lookup is deterministic. As the key we use the concatenated
   // scope, the name to search for and the explicit scope prefix. The speedup
   // achieved by this simple cache can be enormous.
-  int scopeNameLen = scope->name().length()+1;
-  int nameLen = name.length()+1;
-  int explicitPartLen = explicitScopePart.length();
-  int fileScopeLen = hasUsingStatements ? 1+m_fileScope->absFilePath().length() : 0;
-  int argsLen = args.length()+1;
+  size_t scopeNameLen = scope!=Doxygen::globalScope ? scope->name().length()+1 : 0;
+  size_t nameLen = name.length()+1;
+  size_t explicitPartLen = explicitScopePart.length();
+  size_t strippedTemplateParamsLen = strippedTemplateParams.length();
+  size_t fileScopeLen = hasUsingStatements ? 1+m_fileScope->absFilePath().length() : 0;
+  size_t argsLen = args.length()+1;
 
   // below is a more efficient coding of
   // QCString key=scope->name()+"+"+name+"+"+explicitScopePart+args+typesOnly?'T':'F';
-  QCString key(scopeNameLen+nameLen+explicitPartLen+fileScopeLen+argsLen+1);
-  char *pk=key.rawData();
-  qstrcpy(pk,scope->name().data()); *(pk+scopeNameLen-1)='+';
-  pk+=scopeNameLen;
-  qstrcpy(pk,name.data()); *(pk+nameLen-1)='+';
-  pk+=nameLen;
-  qstrcpy(pk,explicitScopePart.data());
-  pk+=explicitPartLen;
+  std::string key;
+  key.reserve(scopeNameLen+nameLen+explicitPartLen+strippedTemplateParamsLen+fileScopeLen+argsLen);
+  if (scope!=Doxygen::globalScope)
+  {
+    key+=scope->name().str();
+    key+='+';
+  }
+  key+=name.str();
+  key+='+';
+  key+=explicitScopePart.str();
+  key+=strippedTemplateParams.str();
 
   // if a file scope is given and it contains using statements we should
   // also use the file part in the key (as a class name can be in
@@ -461,31 +478,29 @@ const Definition *SymbolResolver::Private::getResolvedSymbolRec(
   {
     // below is a more efficient coding of
     // key+="+"+m_fileScope->name();
-    *pk++='+';
-    qstrcpy(pk,m_fileScope->absFilePath().data());
-    pk+=fileScopeLen-1;
+    key+='+';
+    key+=m_fileScope->absFilePath().str();
   }
   if (argsLen>0)
   {
-    qstrcpy(pk,args.data());
-    pk+=argsLen-1;
+    key+='+';
+    key+=args.str();
   }
-  *pk='\0';
 
-  const Definition *bestMatch=0;
+  const Definition *bestMatch=nullptr;
   {
-    if (visitedKeys.find(key.str())!=visitedKeys.end())
+    if (std::find(visitedKeys.begin(),visitedKeys.end(),key)!=std::end(visitedKeys))
     {
       // we are already in the middle of find the definition for this key.
       // avoid recursion
-      return 0;
+      return nullptr;
     }
     // remember the key
-    visitedKeys.insert(key.str());
-    LookupInfo *pval = 0;
+    visitedKeys.push_back(key);
+    LookupInfo *pval = nullptr;
     {
       std::lock_guard lock(g_cacheMutex);
-      pval = Doxygen::symbolLookupCache->find(key.str());
+      pval = Doxygen::symbolLookupCache->find(key);
     }
     AUTO_TRACE_ADD("key={} found={}",key,pval!=nullptr);
     if (pval)
@@ -501,26 +516,32 @@ const Definition *SymbolResolver::Private::getResolvedSymbolRec(
       return pval->definition;
     }
 
-    const MemberDef *bestTypedef=0;
+    const MemberDef *bestTypedef=nullptr;
     QCString bestTemplSpec;
     QCString bestResolvedType;
     int minDistance=10000; // init at "infinite"
 
     for (Definition *d : range)
     {
-      getResolvedSymbol(visitedKeys,scope,d,args,checkCV,insideCode,explicitScopePart,false,
-          minDistance,bestMatch,bestTypedef,bestTemplSpec,bestResolvedType);
+      if (isCodeSymbol(d->definitionType()))
+      {
+         getResolvedSymbol(visitedKeys,scope,d,args,checkCV,insideCode,explicitScopePart,strippedTemplateParams,false,
+            minDistance,bestMatch,bestTypedef,bestTemplSpec,bestResolvedType);
+      }
       if  (minDistance==0) break; // we can stop reaching if we already reached distance 0
     }
 
     // in case we are looking for e.g. func() and the real function is func(int x) we also
     // accept func(), see example 036 in the test set.
-    if (bestMatch==0 && args=="()")
+    if (bestMatch==nullptr && args=="()")
     {
       for (Definition *d : range)
       {
-        getResolvedSymbol(visitedKeys,scope,d,QCString(),false,insideCode,explicitScopePart,true,
+        if (isCodeSymbol(d->definitionType()))
+        {
+          getResolvedSymbol(visitedKeys,scope,d,QCString(),false,insideCode,explicitScopePart,strippedTemplateParams,true,
             minDistance,bestMatch,bestTypedef,bestTemplSpec,bestResolvedType);
+        }
         if  (minDistance==0) break; // we can stop reaching if we already reached distance 0
       }
     }
@@ -539,12 +560,12 @@ const Definition *SymbolResolver::Private::getResolvedSymbolRec(
     }
 
     {
+      LookupInfo lookupInfo(bestMatch,bestTypedef,bestTemplSpec,bestResolvedType);
       std::lock_guard lock(g_cacheMutex);
       // we need to insert the item in the cache again, as it could be removed in the meantime
-      Doxygen::symbolLookupCache->insert(key.str(),
-                            LookupInfo(bestMatch,bestTypedef,bestTemplSpec,bestResolvedType));
+      Doxygen::symbolLookupCache->insert(key,std::move(lookupInfo));
     }
-    visitedKeys.erase(key.str());
+    visitedKeys.erase(std::remove(visitedKeys.begin(),visitedKeys.end(),key),visitedKeys.end());
 
     AUTO_TRACE_EXIT("found name={} templSpec={} typeDef={} resolvedTypedef={}",
         bestMatch?bestMatch->name():QCString(),
@@ -556,11 +577,11 @@ const Definition *SymbolResolver::Private::getResolvedSymbolRec(
 }
 
 void SymbolResolver::Private::getResolvedType(
-                         StringUnorderedSet &visitedKeys,                     // in
+                         VisitedKeys &visitedKeys,                            // in
                          const Definition *scope,                             // in
                          const Definition *d,                                 // in
                          const QCString &explicitScopePart,                   // in
-                         const std::unique_ptr<ArgumentList> &actTemplParams, // in
+                         const ArgumentList *actTemplParams,                  // in
                          int &minDistance,                                    // inout
                          const ClassDef *&bestMatch,                          // out
                          const MemberDef *&bestTypedef,                       // out
@@ -601,8 +622,8 @@ void SymbolResolver::Private::getResolvedType(
             AUTO_TRACE_ADD("found symbol={} at distance={} minDistance={}",cd->name(),distance,minDistance);
             minDistance=distance;
             bestMatch = cd;
-            bestTypedef = 0;
-            bestTemplSpec.resize(0);
+            bestTypedef = nullptr;
+            bestTemplSpec.clear();
             bestResolvedType = cd->qualifiedName();
           }
           else if (distance==minDistance &&
@@ -623,8 +644,8 @@ void SymbolResolver::Private::getResolvedType(
             AUTO_TRACE_ADD("found symbol={} at distance={} minDistance={}",cd->name(),distance,minDistance);
             minDistance=distance;
             bestMatch = cd;
-            bestTypedef = 0;
-            bestTemplSpec.resize(0);
+            bestTypedef = nullptr;
+            bestTemplSpec.clear();
             bestResolvedType = cd->qualifiedName();
           }
         }
@@ -651,7 +672,7 @@ void SymbolResolver::Private::getResolvedType(
               QCString spec;
               QCString type;
               minDistance=distance;
-              const MemberDef *enumType = 0;
+              const MemberDef *enumType = nullptr;
               const ClassDef *cd = newResolveTypedef(visitedKeys,scope,md,&enumType,&spec,&type,actTemplParams);
               if (cd)  // type resolves to a class
               {
@@ -664,7 +685,7 @@ void SymbolResolver::Private::getResolvedType(
               else if (enumType) // type resolves to a member type
               {
                 AUTO_TRACE_ADD("found enum");
-                bestMatch = 0;
+                bestMatch = nullptr;
                 bestTypedef = enumType;
                 bestTemplSpec = "";
                 bestResolvedType = enumType->qualifiedName();
@@ -672,7 +693,7 @@ void SymbolResolver::Private::getResolvedType(
               else if (md->isReference()) // external reference
               {
                 AUTO_TRACE_ADD("found external reference");
-                bestMatch = 0;
+                bestMatch = nullptr;
                 bestTypedef = md;
                 bestTemplSpec = spec;
                 bestResolvedType = type;
@@ -680,10 +701,10 @@ void SymbolResolver::Private::getResolvedType(
               else
               {
                 AUTO_TRACE_ADD("no match");
-                bestMatch = 0;
+                bestMatch = nullptr;
                 bestTypedef = md;
-                bestTemplSpec.resize(0);
-                bestResolvedType.resize(0);
+                bestTemplSpec.clear();
+                bestResolvedType.clear();
               }
             }
             else
@@ -702,7 +723,7 @@ void SymbolResolver::Private::getResolvedType(
           {
             AUTO_TRACE_ADD("found enum={} at distance={} minDistance={}",md->name(),distance,minDistance);
             minDistance=distance;
-            bestMatch = 0;
+            bestMatch = nullptr;
             bestTypedef = md;
             bestTemplSpec = "";
             bestResolvedType = md->qualifiedName();
@@ -721,13 +742,14 @@ void SymbolResolver::Private::getResolvedType(
 
 
 void SymbolResolver::Private::getResolvedSymbol(
-                         StringUnorderedSet &visitedKeys,                     // in
+                         VisitedKeys &visitedKeys,                            // in
                          const Definition *scope,                             // in
                          const Definition *d,                                 // in
                          const QCString &args,                                // in
                          bool  checkCV,                                       // in
                          bool  insideCode,                                    // in
                          const QCString &explicitScopePart,                   // in
+                         const QCString &strippedTemplateParams,              // in
                          bool forceCallable,                                  // in
                          int &minDistance,                                    // inout
                          const Definition *&bestMatch,                        // out
@@ -741,7 +763,11 @@ void SymbolResolver::Private::getResolvedSymbol(
   VisitedNamespaces visitedNamespaces;
   AccessStack accessStack;
   // test accessibility of definition within scope.
-  int distance = isAccessibleFromWithExpScope(visitedKeys,visitedNamespaces,accessStack,scope,d,explicitScopePart);
+  int distance = isAccessibleFromWithExpScope(visitedKeys,visitedNamespaces,accessStack,scope,d,explicitScopePart+strippedTemplateParams);
+  if (distance==-1 && !strippedTemplateParams.isEmpty())
+  {
+    distance = isAccessibleFromWithExpScope(visitedKeys,visitedNamespaces,accessStack,scope,d,explicitScopePart);
+  }
   AUTO_TRACE_ADD("distance={}",distance);
   if (distance!=-1) // definition is accessible
   {
@@ -759,8 +785,8 @@ void SymbolResolver::Private::getResolvedSymbol(
           AUTO_TRACE_ADD("found symbol={} at distance={} minDistance={}",d->name(),distance,minDistance);
           minDistance=distance;
           bestMatch = d;
-          bestTypedef = 0;
-          bestTemplSpec.resize(0);
+          bestTypedef = nullptr;
+          bestTemplSpec.clear();
           bestResolvedType = cd->qualifiedName();
         }
         else if (distance==minDistance &&
@@ -781,8 +807,8 @@ void SymbolResolver::Private::getResolvedSymbol(
           AUTO_TRACE_ADD("found symbol={} at distance={} minDistance={}",d->name(),distance,minDistance);
           minDistance=distance;
           bestMatch = d;
-          bestTypedef = 0;
-          bestTemplSpec.resize(0);
+          bestTypedef = nullptr;
+          bestTemplSpec.clear();
           bestResolvedType = cd->qualifiedName();
         }
       }
@@ -796,10 +822,21 @@ void SymbolResolver::Private::getResolvedSymbol(
       const MemberDef *md = toMemberDef(d);
 
       bool match = true;
-      AUTO_TRACE_ADD("member={}",md->name());
+      AUTO_TRACE_ADD("member={} args={} isCallable()={}",md->name(),argListToString(md->argumentList()),md->isCallable());
       if (md->isCallable() && !args.isEmpty())
       {
-        std::unique_ptr<ArgumentList> argList = stringToArgumentList(md->getLanguage(),args);
+        QCString actArgs;
+        if (md->isArtificial() && md->formalTemplateArguments()) // for members of an instantiated template we need to replace
+                                                                 // the formal arguments by the actual ones before matching
+                                                                 // See issue #10640
+        {
+          actArgs = substituteTemplateArgumentsInString(args,md->formalTemplateArguments().value(),&md->argumentList());
+        }
+        else
+        {
+          actArgs = args;
+        }
+        std::unique_ptr<ArgumentList> argList = stringToArgumentList(md->getLanguage(),actArgs);
         const ArgumentList &mdAl = md->argumentList();
         match = matchArguments2(md->getOuterScope(),md->getFileDef(),&mdAl,
               scope, md->getFileDef(),argList.get(),
@@ -818,16 +855,17 @@ void SymbolResolver::Private::getResolvedSymbol(
       }
     }
     else if ((d->definitionType()==Definition::TypeNamespace ||
-              d->definitionType()==Definition::TypeFile))
+              d->definitionType()==Definition::TypeFile ||
+              d->definitionType()==Definition::TypeModule))
     {
       if (distance<minDistance) // found a definition that is "closer"
       {
         AUTO_TRACE_ADD("found symbol={} at distance={} minDistance={}",d->name(),distance,minDistance);
         minDistance=distance;
         bestMatch = d;
-        bestTypedef = 0;
-        bestTemplSpec.resize(0);
-        bestResolvedType.resize(0);
+        bestTypedef = nullptr;
+        bestTemplSpec.clear();
+        bestResolvedType.clear();
       }
     }
   } // if definition accessible
@@ -841,13 +879,13 @@ void SymbolResolver::Private::getResolvedSymbol(
 
 
 const ClassDef *SymbolResolver::Private::newResolveTypedef(
-                  StringUnorderedSet &visitedKeys,                     // in
+                  VisitedKeys &visitedKeys,                            // in
                   const Definition * /* scope */,                      // in
                   const MemberDef *md,                                 // in
                   const MemberDef **pMemType,                          // out
                   QCString *pTemplSpec,                                // out
                   QCString *pResolvedType,                             // out
-                  const std::unique_ptr<ArgumentList> &actTemplParams) // in
+                  const ArgumentList *actTemplParams)                  // in
 {
   AUTO_TRACE("md={}",md->qualifiedName());
   std::lock_guard<std::recursive_mutex> lock(g_cacheTypedefMutex);
@@ -868,10 +906,10 @@ const ClassDef *SymbolResolver::Private::newResolveTypedef(
   if (m_resolvedTypedefs.find(qname.str())!=m_resolvedTypedefs.end())
   {
     AUTO_TRACE_EXIT("already being processed");
-    return 0; // typedef already done
+    return nullptr; // typedef already done
   }
 
-  auto typedef_it = m_resolvedTypedefs.insert({qname.str(),md}).first; // put on the trace list
+  auto typedef_it = m_resolvedTypedefs.emplace(qname.str(),md).first; // put on the trace list
 
   const ClassDef *typeClass = md->getClassDef();
   QCString type = md->typeString(); // get the "value" of the typedef
@@ -882,7 +920,7 @@ const ClassDef *SymbolResolver::Private::newResolveTypedef(
             typeClass->templateArguments(),actTemplParams);
   }
   QCString typedefValue = type;
-  int tl=type.length();
+  int tl=static_cast<int>(type.length());
   int ip=tl-1; // remove * and & at the end
   while (ip>=0 && (type.at(ip)=='*' || type.at(ip)=='&' || type.at(ip)==' '))
   {
@@ -894,16 +932,16 @@ const ClassDef *SymbolResolver::Private::newResolveTypedef(
   type.stripPrefix("struct "); // strip leading "struct"
   type.stripPrefix("union ");  // strip leading "union"
   int sp=0;
-  tl=type.length(); // length may have been changed
+  tl=static_cast<int>(type.length()); // length may have been changed
   while (sp<tl && type.at(sp)==' ') sp++;
-  const MemberDef *memTypeDef = 0;
+  const MemberDef *memTypeDef = nullptr;
   const ClassDef *result = getResolvedTypeRec(visitedKeys,md->getOuterScope(),type,
-                                                &memTypeDef,0,pResolvedType);
+                                                &memTypeDef,nullptr,pResolvedType);
   // if type is a typedef then return what it resolves to.
   if (memTypeDef && memTypeDef->isTypedef())
   {
     AUTO_TRACE_ADD("resolving typedef");
-    result=newResolveTypedef(visitedKeys,m_fileScope,memTypeDef,pMemType,pTemplSpec,0);
+    result=newResolveTypedef(visitedKeys,m_fileScope,memTypeDef,pMemType,pTemplSpec,nullptr);
     goto done;
   }
   else if (memTypeDef && memTypeDef->isEnumerate() && pMemType)
@@ -911,7 +949,7 @@ const ClassDef *SymbolResolver::Private::newResolveTypedef(
     *pMemType = memTypeDef;
   }
 
-  if (result==0)
+  if (result==nullptr)
   {
     // try unspecialized version if type is template
     int si=type.findRev("::");
@@ -919,21 +957,21 @@ const ClassDef *SymbolResolver::Private::newResolveTypedef(
     if (si==-1 && i!=-1) // typedef of a template => try the unspecialized version
     {
       if (pTemplSpec) *pTemplSpec = type.mid(i);
-      result = getResolvedTypeRec(visitedKeys,md->getOuterScope(),type.left(i),0,0,pResolvedType);
+      result = getResolvedTypeRec(visitedKeys,md->getOuterScope(),type.left(i),nullptr,nullptr,pResolvedType);
     }
     else if (si!=-1) // A::B
     {
       i=type.find('<',si);
       if (i==-1) // Something like A<T>::B => lookup A::B
       {
-        i=type.length();
+        i=static_cast<int>(type.length());
       }
       else // Something like A<T>::B<S> => lookup A::B, spec=<S>
       {
         if (pTemplSpec) *pTemplSpec = type.mid(i);
       }
       result = getResolvedTypeRec(visitedKeys,md->getOuterScope(),
-           stripTemplateSpecifiersFromScope(type.left(i),FALSE),0,0,pResolvedType);
+           stripTemplateSpecifiersFromScope(type.left(i),FALSE),nullptr,nullptr,pResolvedType);
     }
   }
 
@@ -988,7 +1026,7 @@ static bool isParentScope(const Definition *parent,const Definition *item)
 #endif
 
 int SymbolResolver::Private::isAccessibleFromWithExpScope(
-                                     StringUnorderedSet &visitedKeys,
+                                     VisitedKeys &visitedKeys,
                                      VisitedNamespaces &visitedNamespaces,
                                      AccessStack       &accessStack,
                                      const Definition *scope,
@@ -1058,17 +1096,17 @@ int SymbolResolver::Private::isAccessibleFromWithExpScope(
       int i=-1;
       if (newScope->definitionType()==Definition::TypeNamespace)
       {
-        visitedNamespaces.insert({newScope->name().str(),newScope});
+        visitedNamespaces.emplace(newScope->name().str(),newScope);
         // this part deals with the case where item is a class
         // A::B::C but is explicit referenced as A::C, where B is imported
         // in A via a using directive.
         //printf("newScope is a namespace: %s!\n",qPrint(newScope->name()));
         const NamespaceDef *nscope = toNamespaceDef(newScope);
-        for (const auto &cd : nscope->getUsedClasses())
+        for (const auto &ud : nscope->getUsedDefinitions())
         {
-          if (cd==item)
+          if (ud==item)
           {
-            AUTO_TRACE_ADD("found in used class {}",cd->name());
+            AUTO_TRACE_ADD("found in used definition {}",ud->name());
             goto done;
           }
         }
@@ -1109,8 +1147,8 @@ int SymbolResolver::Private::isAccessibleFromWithExpScope(
     if (scope->definitionType()==Definition::TypeNamespace)
     {
       const NamespaceDef *nscope = toNamespaceDef(scope);
-      StringUnorderedSet locVisitedNamespaces;
-      if (accessibleViaUsingNamespace(visitedKeys,locVisitedNamespaces,nscope->getUsedNamespaces(),item,explicitScopePart))
+      VisitedNamespaceKeys locVisitedNamespaceKeys;
+      if (accessibleViaUsingNamespace(visitedKeys,locVisitedNamespaceKeys,nscope->getUsedNamespaces(),item,explicitScopePart))
       {
         AUTO_TRACE_ADD("found in used class");
         goto done;
@@ -1120,8 +1158,8 @@ int SymbolResolver::Private::isAccessibleFromWithExpScope(
     {
       if (m_fileScope)
       {
-        StringUnorderedSet locVisitedNamespaces;
-        if (accessibleViaUsingNamespace(visitedKeys,locVisitedNamespaces,m_fileScope->getUsedNamespaces(),item,explicitScopePart))
+        VisitedNamespaceKeys locVisitedNamespaceKeys;
+        if (accessibleViaUsingNamespace(visitedKeys,locVisitedNamespaceKeys,m_fileScope->getUsedNamespaces(),item,explicitScopePart))
         {
           AUTO_TRACE_ADD("found in used namespace");
           goto done;
@@ -1143,24 +1181,23 @@ done:
   return result;
 }
 
-const Definition *SymbolResolver::Private::followPath(StringUnorderedSet &visitedKeys,
+const Definition *SymbolResolver::Private::followPath(VisitedKeys &visitedKeys,
                                                       const Definition *start,const QCString &path)
 {
   AUTO_TRACE("start={},path={}",start?start->name():QCString(), path);
-  int is,ps;
-  int l;
+  int is=0,ps=0,l=0;
+
   const Definition *current=start;
-  ps=0;
   // for each part of the explicit scope
   while ((is=getScopeFragment(path,ps,&l))!=-1)
   {
     // try to resolve the part if it is a typedef
-    const MemberDef *memTypeDef=0;
+    const MemberDef *memTypeDef=nullptr;
     QCString qualScopePart = substTypedef(visitedKeys,current,path.mid(is,l),&memTypeDef);
     AUTO_TRACE_ADD("qualScopePart={}",qualScopePart);
     if (memTypeDef)
     {
-      const ClassDef *type = newResolveTypedef(visitedKeys,m_fileScope,memTypeDef,0,0,0);
+      const ClassDef *type = newResolveTypedef(visitedKeys,m_fileScope,memTypeDef,nullptr,nullptr,nullptr);
       if (type)
       {
         AUTO_TRACE_EXIT("type={}",type->name());
@@ -1170,7 +1207,7 @@ const Definition *SymbolResolver::Private::followPath(StringUnorderedSet &visite
     const Definition *next = current->findInnerCompound(qualScopePart);
     AUTO_TRACE_ADD("Looking for {} inside {} result={}",
         qualScopePart, current->name(), next?next->name():QCString());
-    if (next==0)
+    if (next==nullptr)
     {
       next = current->findInnerCompound(qualScopePart+"-p");
     }
@@ -1214,20 +1251,20 @@ const Definition *SymbolResolver::Private::followPath(StringUnorderedSet &visite
          }
        }
     }
-    if (next==0) // failed to follow the path
+    if (next==nullptr) // failed to follow the path
     {
       if (current->definitionType()==Definition::TypeNamespace)
       {
         next = endOfPathIsUsedClass(
-            (toNamespaceDef(current))->getUsedClasses(),qualScopePart);
+            (toNamespaceDef(current))->getUsedDefinitions(),qualScopePart);
       }
       else if (current->definitionType()==Definition::TypeFile)
       {
         next = endOfPathIsUsedClass(
-            (toFileDef(current))->getUsedClasses(),qualScopePart);
+            (toFileDef(current))->getUsedDefinitions(),qualScopePart);
       }
       current = next;
-      if (current==0) break;
+      if (current==nullptr) break;
     }
     else // continue to follow scope
     {
@@ -1236,25 +1273,26 @@ const Definition *SymbolResolver::Private::followPath(StringUnorderedSet &visite
     }
     ps=is+l;
   }
+
   AUTO_TRACE_EXIT("result={}",current?current->name():QCString());
   return current; // path could be followed
 }
 
-const Definition *SymbolResolver::Private::endOfPathIsUsedClass(const LinkedRefMap<ClassDef> &cl,const QCString &localName)
+const Definition *SymbolResolver::Private::endOfPathIsUsedClass(const LinkedRefMap<const Definition> &dl,const QCString &localName)
 {
-  for (const auto &cd : cl)
+  for (const auto &d : dl)
   {
-    if (cd->localName()==localName)
+    if (d->localName()==localName)
     {
-      return cd;
+      return d;
     }
   }
-  return 0;
+  return nullptr;
 }
 
 bool SymbolResolver::Private::accessibleViaUsingNamespace(
-                                 StringUnorderedSet &visitedKeys,
-                                 StringUnorderedSet &visitedNamespaces,
+                                 VisitedKeys &visitedKeys,
+                                 VisitedNamespaceKeys &visitedNamespaces,
                                  const LinkedRefMap<NamespaceDef> &nl,
                                  const Definition *item,
                                  const QCString &explicitScopePart,
@@ -1270,11 +1308,12 @@ bool SymbolResolver::Private::accessibleViaUsingNamespace(
       AUTO_TRACE_EXIT("true");
       return true;
     }
-    if (item->getLanguage()==SrcLangExt_Cpp)
+    if (item->getLanguage()==SrcLangExt::Cpp)
     {
       QCString key=und->qualifiedName();
-      if (!und->getUsedNamespaces().empty() && visitedNamespaces.insert(key.str()).second)
+      if (!und->getUsedNamespaces().empty() && std::find(visitedNamespaces.begin(),visitedNamespaces.end(),key.str())==std::end(visitedNamespaces))
       {
+        visitedNamespaces.push_back(key.str());
         if (accessibleViaUsingNamespace(visitedKeys,visitedNamespaces,und->getUsedNamespaces(),item,explicitScopePart,level+1))
         {
           AUTO_TRACE_EXIT("true");
@@ -1289,16 +1328,16 @@ bool SymbolResolver::Private::accessibleViaUsingNamespace(
 }
 
 
-bool SymbolResolver::Private::accessibleViaUsingClass(StringUnorderedSet &visitedKeys,
-                                                      const LinkedRefMap<ClassDef> &cl,
+bool SymbolResolver::Private::accessibleViaUsingDefinition(VisitedKeys &visitedKeys,
+                                                      const LinkedRefMap<const Definition> &dl,
                                                       const Definition *item,
                                                       const QCString &explicitScopePart)
 {
   AUTO_TRACE("item={} explicitScopePart={}",item?item->name():QCString(), explicitScopePart);
-  for (const auto &ucd : cl)
+  for (const auto &ud : dl)
   {
-    AUTO_TRACE_ADD("trying via used class '{}'",ucd->name());
-    const Definition *sc = explicitScopePart.isEmpty() ? ucd : followPath(visitedKeys,ucd,explicitScopePart);
+    AUTO_TRACE_ADD("trying via used definition '{}'",ud->name());
+    const Definition *sc = explicitScopePart.isEmpty() ? ud : followPath(visitedKeys,ud,explicitScopePart);
     if (sc && sc==item)
     {
       AUTO_TRACE_EXIT("true");
@@ -1309,13 +1348,14 @@ bool SymbolResolver::Private::accessibleViaUsingClass(StringUnorderedSet &visite
   return false;
 }
 
-int SymbolResolver::Private::isAccessibleFrom(StringUnorderedSet &visitedKeys,
+int SymbolResolver::Private::isAccessibleFrom(VisitedKeys &visitedKeys,
                                               AccessStack &accessStack,
                                               const Definition *scope,
                                               const Definition *item)
 {
-  AUTO_TRACE("scope={} item={}",
-      scope?scope->name():QCString(), item?item->name():QCString());
+  AUTO_TRACE("scope={} item={} item.definitionType={}",
+      scope?scope->name():QCString(), item?item->name():QCString(),
+      item?(int)item->definitionType():-1);
 
   if (accessStack.find(scope,m_fileScope,item))
   {
@@ -1379,8 +1419,8 @@ int SymbolResolver::Private::isAccessibleFrom(StringUnorderedSet &visitedKeys,
     if (nestedClassInsideBaseClass)
     {
       result++; // penalty for base class to prevent
-                                              // this is preferred over nested class in this class
-                                              // see bug 686956
+                // this is preferred over nested class in this class
+                // see bug 686956
     }
     else if (memberAccessibleFromScope &&
              itemScope &&
@@ -1406,13 +1446,13 @@ int SymbolResolver::Private::isAccessibleFrom(StringUnorderedSet &visitedKeys,
     }
     if (m_fileScope)
     {
-      if (accessibleViaUsingClass(visitedKeys,m_fileScope->getUsedClasses(),item))
+      if (accessibleViaUsingDefinition(visitedKeys,m_fileScope->getUsedDefinitions(),item))
       {
         AUTO_TRACE_ADD("found via used class");
         goto done;
       }
-      StringUnorderedSet visitedNamespaces;
-      if (accessibleViaUsingNamespace(visitedKeys,visitedNamespaces,m_fileScope->getUsedNamespaces(),item))
+      VisitedNamespaceKeys visitedNamespaceKeys;
+      if (accessibleViaUsingNamespace(visitedKeys,visitedNamespaceKeys,m_fileScope->getUsedNamespaces(),item))
       {
         AUTO_TRACE_ADD("found via used namespace");
         goto done;
@@ -1427,13 +1467,13 @@ int SymbolResolver::Private::isAccessibleFrom(StringUnorderedSet &visitedKeys,
     if (scope->definitionType()==Definition::TypeNamespace)
     {
       const NamespaceDef *nscope = toNamespaceDef(scope);
-      if (accessibleViaUsingClass(visitedKeys,nscope->getUsedClasses(),item))
+      if (accessibleViaUsingDefinition(visitedKeys,nscope->getUsedDefinitions(),item))
       {
         AUTO_TRACE_ADD("found via used class");
         goto done;
       }
-      StringUnorderedSet visitedNamespaces;
-      if (accessibleViaUsingNamespace(visitedKeys,visitedNamespaces,nscope->getUsedNamespaces(),item,0))
+      VisitedNamespaceKeys visitedNamespaceKeys;
+      if (accessibleViaUsingNamespace(visitedKeys,visitedNamespaceKeys,nscope->getUsedNamespaces(),item,QCString()))
       {
         AUTO_TRACE_ADD("found via used namespace");
         goto done;
@@ -1442,13 +1482,13 @@ int SymbolResolver::Private::isAccessibleFrom(StringUnorderedSet &visitedKeys,
     else if (scope->definitionType()==Definition::TypeFile)
     {
       const FileDef *nfile = toFileDef(scope);
-      if (accessibleViaUsingClass(visitedKeys,nfile->getUsedClasses(),item))
+      if (accessibleViaUsingDefinition(visitedKeys,nfile->getUsedDefinitions(),item))
       {
         AUTO_TRACE_ADD("found via used class");
         goto done;
       }
-      StringUnorderedSet visitedNamespaces;
-      if (accessibleViaUsingNamespace(visitedKeys,visitedNamespaces,nfile->getUsedNamespaces(),item,0))
+      VisitedNamespaceKeys visitedNamespaceKeys;
+      if (accessibleViaUsingNamespace(visitedKeys,visitedNamespaceKeys,nfile->getUsedNamespaces(),item,QCString()))
       {
         AUTO_TRACE_ADD("found via used namespace");
         goto done;
@@ -1477,7 +1517,7 @@ done:
 }
 
 QCString SymbolResolver::Private::substTypedef(
-                          StringUnorderedSet &visitedKeys,
+                          VisitedKeys &visitedKeys,
                           const Definition *scope,const QCString &name,
                           const MemberDef **pTypeDef)
 {
@@ -1489,8 +1529,26 @@ QCString SymbolResolver::Private::substTypedef(
   if (range.empty())
     return result; // no matches
 
-  MemberDef *bestMatch=0;
+  MemberDef *bestMatch=nullptr;
   int minDistance=10000; // init at "infinite"
+
+  std::string key;
+  const int maxAddrSize = 20;
+  char ptr_str[maxAddrSize];
+  int num = qsnprintf(ptr_str,maxAddrSize,"%p:",(void *)scope);
+  assert(num>0);
+  key.reserve(num+name.length()+1);
+  key+=ptr_str;
+  key+=name.str();
+  {
+    std::lock_guard lock(g_substMapMutex);
+    auto it = g_substMap.find(key);
+    if (it!=g_substMap.end())
+    {
+      if (pTypeDef) *pTypeDef = it->second.second;
+      return it->second.first;
+    }
+  }
 
   for (Definition *d : range)
   {
@@ -1521,6 +1579,13 @@ QCString SymbolResolver::Private::substTypedef(
     if (pTypeDef) *pTypeDef=bestMatch;
   }
 
+  // cache the result of the computation to give a faster answers next time, especially relevant
+  // if `range` has many arguments (i.e. there are many symbols with the same name in different contexts)
+  {
+    std::lock_guard lock(g_substMapMutex);
+    g_substMap.emplace(key,std::make_pair(result,bestMatch));
+  }
+
   AUTO_TRACE_EXIT("result={}",result);
   return result;
 }
@@ -1547,30 +1612,34 @@ const ClassDef *SymbolResolver::resolveClass(const Definition *scope,
       scope?scope->name():QCString(), name, mayBeUnlinkable, mayBeHidden);
   p->reset();
 
-  if (scope==0 ||
+  auto lang = scope ? scope->getLanguage() : SrcLangExt::Cpp;
+
+  if (scope==nullptr ||
       (scope->definitionType()!=Definition::TypeClass &&
        scope->definitionType()!=Definition::TypeNamespace
       ) ||
       (name.stripWhiteSpace().startsWith("::")) ||
-      (scope->getLanguage()==SrcLangExt_Java && QCString(name).find("::")!=-1)
+      ((lang==SrcLangExt::Java || lang==SrcLangExt::CSharp) && QCString(name).find("::")!=-1)
      )
   {
     scope=Doxygen::globalScope;
   }
-  const ClassDef *result=0;
+  const ClassDef *result=nullptr;
   if (Config_getBool(OPTIMIZE_OUTPUT_VHDL))
   {
     result = getClass(name);
   }
   else
   {
-    StringUnorderedSet visitedKeys;
-    result = p->getResolvedTypeRec(visitedKeys,scope,name,&p->typeDef,&p->templateSpec,&p->resolvedType);
-    if (result==0) // for nested classes imported via tag files, the scope may not
+    VisitedKeys visitedKeys;
+    QCString lookupName = lang==SrcLangExt::CSharp ? mangleCSharpGenericName(name) : name;
+    AUTO_TRACE_ADD("lookup={}",lookupName);
+    result = p->getResolvedTypeRec(visitedKeys,scope,lookupName,&p->typeDef,&p->templateSpec,&p->resolvedType);
+    if (result==nullptr) // for nested classes imported via tag files, the scope may not
                    // present, so we check the class name directly as well.
                    // See also bug701314
     {
-      result = getClass(name);
+      result = getClass(lookupName);
     }
   }
   if (!mayBeUnlinkable && result && !result->isLinkable())
@@ -1578,7 +1647,7 @@ const ClassDef *SymbolResolver::resolveClass(const Definition *scope,
     if (!mayBeHidden || !result->isHidden())
     {
       AUTO_TRACE_ADD("hiding symbol {}",result->name());
-      result=0; // don't link to artificial/hidden classes unless explicitly allowed
+      result=nullptr; // don't link to artificial/hidden classes unless explicitly allowed
     }
   }
   AUTO_TRACE_EXIT("result={}",result?result->name():QCString());
@@ -1594,10 +1663,11 @@ const Definition *SymbolResolver::resolveSymbol(const Definition *scope,
   AUTO_TRACE("scope={} name={} args={} checkCV={} insideCode={}",
              scope?scope->name():QCString(), name, args, checkCV, insideCode);
   p->reset();
-  if (scope==0) scope=Doxygen::globalScope;
-  StringUnorderedSet visitedKeys;
+  if (scope==nullptr) scope=Doxygen::globalScope;
+  VisitedKeys visitedKeys;
   const Definition *result = p->getResolvedSymbolRec(visitedKeys,scope,name,args,checkCV,insideCode,&p->typeDef,&p->templateSpec,&p->resolvedType);
-  AUTO_TRACE_EXIT("result={}", qPrint(result?result->qualifiedName():QCString()));
+  AUTO_TRACE_EXIT("result={}{}", qPrint(result?result->qualifiedName():QCString()),
+                                 qPrint(result && result->definitionType()==Definition::TypeMember ? toMemberDef(result)->argsString() : QCString()));
   return result;
 }
 
@@ -1606,7 +1676,7 @@ int SymbolResolver::isAccessibleFrom(const Definition *scope,const Definition *i
   AUTO_TRACE("scope={} item={}",
       scope?scope->name():QCString(), item?item->name():QCString());
   p->reset();
-  StringUnorderedSet visitedKeys;
+  VisitedKeys visitedKeys;
   AccessStack accessStack;
   int result = p->isAccessibleFrom(visitedKeys,accessStack,scope,item);
   AUTO_TRACE_EXIT("result={}",result);
@@ -1619,7 +1689,7 @@ int SymbolResolver::isAccessibleFromWithExpScope(const Definition *scope,const D
   AUTO_TRACE("scope={} item={} explicitScopePart={}",
       scope?scope->name():QCString(), item?item->name():QCString(), explicitScopePart);
   p->reset();
-  StringUnorderedSet visitedKeys;
+  VisitedKeys visitedKeys;
   VisitedNamespaces visitedNamespaces;
   AccessStack accessStack;
   int result = p->isAccessibleFromWithExpScope(visitedKeys,visitedNamespaces,accessStack,scope,item,explicitScopePart);

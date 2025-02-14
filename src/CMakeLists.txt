@@ -17,7 +17,10 @@ include_directories(
 if (NOT use_sys_spdlog)
     include_directories(${PROJECT_SOURCE_DIR}/deps/spdlog/include)
 endif()
-if (NOT use_sys_sqlite)
+if (NOT use_sys_fmt)
+    include_directories(${PROJECT_SOURCE_DIR}/deps/fmt/include)
+endif()
+if (NOT use_sys_sqlite3)
     include_directories(${PROJECT_SOURCE_DIR}/deps/sqlite3)
 endif()
 
@@ -72,7 +75,7 @@ set_source_files_properties(${GENERATED_SRC}/configoptions.cpp PROPERTIES GENERA
 
 # ce_parse.h
 add_custom_command(
-    COMMAND ${BISON_EXECUTABLE} -l -d -p ce_parsexpYY ${CMAKE_CURRENT_LIST_DIR}/constexp.y -o ce_parse.c
+    COMMAND ${BISON_EXECUTABLE} -l -d ${CMAKE_CURRENT_LIST_DIR}/constexp.y -o ce_parse.c
     DEPENDS ${CMAKE_CURRENT_LIST_DIR}/constexp.y
     OUTPUT ${GENERATED_SRC}/ce_parse.h
     WORKING_DIRECTORY ${GENERATED_SRC}
@@ -199,7 +202,6 @@ if(enable_coverage)
 endif()
 
 add_library(doxycfg STATIC
-    ${GENERATED_SRC}/configvalues.h
     ${GENERATED_SRC}/configimpl.cpp
     ${GENERATED_SRC}/configimpl.l.h
     ${GENERATED_SRC}/configoptions.cpp
@@ -211,6 +213,11 @@ add_library(doxycfg STATIC
     debug.cpp
     trace.cpp
 )
+add_dependencies(doxycfg generate_configvalues_header)
+
+target_link_libraries(doxycfg PRIVATE
+    spdlog::spdlog
+)
 add_sanitizers(doxycfg)
 
 add_library(doxymain STATIC
@@ -220,7 +227,6 @@ add_library(doxymain STATIC
     #
     ${GENERATED_SRC}/ce_parse.cpp
     # custom generated files
-    ${GENERATED_SRC}/configvalues.h
     ${GENERATED_SRC}/ce_parse.h
     ${GENERATED_SRC}/resources.cpp
     #
@@ -307,6 +313,7 @@ add_library(doxymain STATIC
     rtfstyle.cpp
     searchindex.cpp
     searchindex_js.cpp
+    singlecomment.cpp
     sitemap.cpp
     sqlite3gen.cpp
     stlsupport.cpp
@@ -321,7 +328,11 @@ add_library(doxymain STATIC
     xmldocvisitor.cpp
     xmlgen.cpp
 )
+target_link_libraries(doxymain PRIVATE
+    spdlog::spdlog
+)
 add_sanitizers(doxymain)
+add_dependencies(doxymain generate_configvalues_header)
 
 # LLVM/clang headers give a lot of warnings with -Wshadow and -Wcast-align so we disable them for
 # the one file that includes them.
@@ -387,8 +398,7 @@ target_link_libraries(doxygen PRIVATE
     xml
     doxygen_version
     vhdlparser
-    spdlog::spdlog
-    ${ICONV_LIBRARIES}
+    ${Iconv_LIBRARIES}
     ${CMAKE_THREAD_LIBS_INIT}
     ${EXTRA_LIBS}
     ${CLANG_LIBS}

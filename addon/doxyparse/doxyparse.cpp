@@ -46,7 +46,7 @@
 #include "portable.h"
 #include "dir.h"
 
-class Doxyparse : public OutputCodeExtension
+class Doxyparse : public OutputCodeIntf
 {
   public:
     Doxyparse(const FileDef *fd) : m_fd(fd) {}
@@ -55,7 +55,12 @@ class Doxyparse : public OutputCodeExtension
     // these are just null functions, they can be used to produce a syntax highlighted
     // and cross-linked version of the source code, but who needs that anyway ;-)
     OutputType type() const override { return OutputType::Extension; }
+    std::unique_ptr<OutputCodeIntf> clone() override { return std::make_unique<Doxyparse>(m_fd); }
     void codify(const QCString &) override {}
+    void stripCodeComments(bool) override {}
+    void startSpecialComment() override {}
+    void endSpecialComment() override {}
+    void setStripIndentAmount(size_t) override {}
     void writeCodeLink(CodeSymbolType,const QCString &,const QCString &,const QCString &,const QCString &,const QCString &)  override {}
     void startCodeLine(int) override {}
     void endCodeLine() override {}
@@ -99,12 +104,13 @@ static void findXRefSymbols(FileDef *fd)
   intf->resetCodeParserState();
 
   // create a new backend object
-  Doxyparse parse(fd);
+  std::unique_ptr<OutputCodeIntf> parse = std::make_unique<Doxyparse>(fd);
   OutputCodeList parseList;
-  parseList.add(OutputCodeDeferExtension(&parse));
+  parseList.add(std::move(parse));
 
   // parse the source code
-  intf->parseCode(parseList, 0, fileToString(fd->absFilePath()), lang, FALSE, 0, fd);
+  intf->parseCode(parseList, QCString(), fileToString(fd->absFilePath()), lang,
+                  FALSE, FALSE, QCString(), fd);
 }
 
 static bool ignoreStaticExternalCall(const MemberDef *context, const MemberDef *md) {
@@ -176,7 +182,7 @@ static void printNumberOfConditionalPaths(const MemberDef* md) {
 }
 
 static int isPartOfCStruct(const MemberDef * md) {
-  return is_c_code && md->getClassDef() != NULL;
+  return is_c_code && md->getClassDef() != nullptr;
 }
 
 std::string sanitizeString(std::string data) {
@@ -251,10 +257,10 @@ void protectionInformation(Protection protection) {
 }
 
 void cModule(const ClassDef* cd) {
-  const MemberList* ml = cd->getMemberList(MemberListType_variableMembers);
+  const MemberList* ml = cd->getMemberList(MemberListType::VariableMembers());
   if (ml) {
     const FileDef *fd = cd->getFileDef();
-    const MemberList *fd_ml = fd->getMemberList(MemberListType_allMembersList);
+    const MemberList *fd_ml = fd->getMemberList(MemberListType::AllMembersList());
     if (!fd_ml || fd_ml->size() == 0) {
       printModule(fd->getOutputFileBase().data());
       printDefines();
@@ -339,11 +345,11 @@ void listMembers(const MemberList *ml) {
 
 void listAllMembers(const ClassDef* cd) {
   // methods
-  listMembers(cd->getMemberList(MemberListType_functionMembers));
+  listMembers(cd->getMemberList(MemberListType::FunctionMembers()));
   // constructors
-  listMembers(cd->getMemberList(MemberListType_constructors));
+  listMembers(cd->getMemberList(MemberListType::Constructors()));
   // attributes
-  listMembers(cd->getMemberList(MemberListType_variableMembers));
+  listMembers(cd->getMemberList(MemberListType::VariableMembers()));
 }
 
 static void classInformation(const ClassDef* cd) {
@@ -399,7 +405,7 @@ static void listSymbols() {
   for (const auto &fn : *Doxygen::inputNameLinkedMap) {
     for (const auto &fd : *fn) {
       printFile(fd->absFilePath().data());
-      MemberList *ml = fd->getMemberList(MemberListType_allMembersList);
+      MemberList *ml = fd->getMemberList(MemberListType::AllMembersList());
       if (ml && ml->size() > 0) {
         printModule(fd->getOutputFileBase().data());
         printDefines();

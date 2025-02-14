@@ -30,9 +30,13 @@ class DefinitionImpl
     DefinitionImpl(
         Definition *def,
         const QCString &defFileName,int defLine,int defColumn,
-        const QCString &name,const char *b=0,const char *d=0,
+        const QCString &name,const char *b=nullptr,const char *d=nullptr,
         bool isSymbol=TRUE);
     ~DefinitionImpl();
+    DefinitionImpl(const DefinitionImpl &d);
+    DefinitionImpl &operator=(const DefinitionImpl &d);
+    DefinitionImpl(DefinitionImpl &&d) = delete;
+    DefinitionImpl &operator=(DefinitionImpl &&d) = delete;
 
     const QCString &name() const;
     bool isAnonymous() const;
@@ -92,8 +96,8 @@ class DefinitionImpl
     void addSectionsToDefinition(const std::vector<const SectionInfo*> &anchorList);
     void setBodySegment(int defLine,int bls,int ble);
     void setBodyDef(const FileDef *fd);
-    void addSourceReferencedBy(MemberDef *d);
-    void addSourceReferences(MemberDef *d);
+    void addSourceReferencedBy(MemberDef *d,const QCString &sourceRefName);
+    void addSourceReferences(MemberDef *d,const QCString &sourceRefName);
     void setRefItems(const RefItemVector &sli);
     void mergeRefItems(Definition *d);
     void mergeReferences(const Definition *other);
@@ -104,7 +108,7 @@ class DefinitionImpl
     void setArtificial(bool b);
     void setExported(bool b);
     void setLanguage(SrcLangExt lang);
-    void writeSourceDef(OutputList &ol,const QCString &scopeName) const;
+    void writeSourceDef(OutputList &ol) const;
     void writeInlineCode(OutputList &ol,const QCString &scopeName) const;
     bool hasSourceRefs() const;
     bool hasSourceReffedBy() const;
@@ -118,13 +122,11 @@ class DefinitionImpl
     QCString pathFragment() const;
     void writeDocAnchorsToTagFile(TextStream &) const;
     void setLocalName(const QCString &name);
-    void addSectionsToIndex();
     void writeToc(OutputList &ol, const LocalToc &lt) const;
     void computeTooltip();
     void _setSymbolName(const QCString &name);
     QCString _symbolName() const;
 
-    DefinitionImpl(const DefinitionImpl &d);
 
   private:
 
@@ -137,8 +139,8 @@ class DefinitionImpl
     bool _docsAlreadyAdded(const QCString &doc,QCString &sigList);
 
     // PIMPL idiom
-    class IMPL;
-    std::unique_ptr<IMPL> m_impl; // internal structure holding all private data
+    class Private;
+    std::unique_ptr<Private> p; // internal structure holding all private data
 };
 
 template<class Base>
@@ -148,9 +150,13 @@ class DefinitionMixin : public Base
     /*! Create a new definition */
     DefinitionMixin(
         const QCString &defFileName,int defLine,int defColumn,
-        const QCString &name,const char *b=0,const char *d=0,
+        const QCString &name,const char *b=nullptr,const char *d=nullptr,
         bool isSymbol=TRUE) : m_impl(this,defFileName,defLine,defColumn,name,b,d,isSymbol) {}
-    ~DefinitionMixin() = default;
+    DefinitionMixin(const DefinitionMixin &other) : Base(other), m_impl(other.m_impl) {}
+    DefinitionMixin &operator=(const DefinitionMixin &other) { if (this!=&other) { m_impl = other.m_impl; }; return *this; }
+    DefinitionMixin(DefinitionMixin &&) = delete;
+    DefinitionMixin &operator=(DefinitionMixin &&) = delete;
+   ~DefinitionMixin() override = default;
 
     bool isAlias() const override { return FALSE; }
 
@@ -223,10 +229,10 @@ class DefinitionMixin : public Base
     { m_impl.setBodySegment(defLine,bls,ble); }
     void setBodyDef(const FileDef *fd) override
     { m_impl.setBodyDef(fd); }
-    void addSourceReferencedBy(MemberDef *md) override
-    { m_impl.addSourceReferencedBy(md); }
-    void addSourceReferences(MemberDef *md) override
-    { m_impl.addSourceReferences(md); }
+    void addSourceReferencedBy(MemberDef *md,const QCString &sourceRefName) override
+    { m_impl.addSourceReferencedBy(md,sourceRefName); }
+    void addSourceReferences(MemberDef *md,const QCString &sourceRefName) override
+    { m_impl.addSourceReferences(md,sourceRefName); }
     void setRefItems(const RefItemVector &sli) override
     { m_impl.setRefItems(sli); }
     void mergeRefItems(Definition *def) override
@@ -247,8 +253,8 @@ class DefinitionMixin : public Base
     { m_impl.setExported(b); }
     void setLanguage(SrcLangExt lang) override
     { m_impl.setLanguage(lang); }
-    void writeSourceDef(OutputList &ol,const QCString &scopeName) const override
-    { m_impl.writeSourceDef(ol,scopeName); }
+    void writeSourceDef(OutputList &ol) const override
+    { m_impl.writeSourceDef(ol); }
     void writeInlineCode(OutputList &ol,const QCString &scopeName) const override
     { m_impl.writeInlineCode(ol,scopeName); }
     bool hasSourceRefs() const override
@@ -275,8 +281,6 @@ class DefinitionMixin : public Base
     { m_impl.writeDocAnchorsToTagFile(fs); }
     void setLocalName(const QCString &name) override
     { m_impl.setLocalName(name); }
-    void addSectionsToIndex() override
-    { m_impl.addSectionsToIndex(); }
     void writeToc(OutputList &ol, const LocalToc &lt) const override
     { m_impl.writeToc(ol,lt); }
     void computeTooltip() override
@@ -285,10 +289,6 @@ class DefinitionMixin : public Base
     { m_impl._setSymbolName(name); }
     QCString _symbolName() const override
     { return m_impl._symbolName(); }
-
-  protected:
-
-    DefinitionMixin(const DefinitionMixin &def) = default;
 
   private:
     Definition *toDefinition_() override { return this; }
@@ -303,16 +303,17 @@ class DefinitionAliasImpl
   public:
     DefinitionAliasImpl(Definition *def,const Definition *scope,const Definition *alias);
     virtual ~DefinitionAliasImpl();
+    NON_COPYABLE(DefinitionAliasImpl)
+
     void init();
     void deinit();
     const QCString &name() const;
     QCString qualifiedName() const;
   private:
-    void updateQualifiedName() const;
     Definition *m_def;
     const Definition *m_scope;
     QCString m_symbolName;
-    mutable QCString m_qualifiedName;
+    QCString m_qualifiedName;
 };
 
 template<class Base>
@@ -321,11 +322,12 @@ class DefinitionAliasMixin : public Base
   public:
     DefinitionAliasMixin(const Definition *scope,const Definition *alias)
       : m_impl(this,scope,alias), m_scope(scope), m_alias(alias) {}
+   ~DefinitionAliasMixin() override = default;
+    NON_COPYABLE(DefinitionAliasMixin)
 
     void init() { m_impl.init(); }
     void deinit() { m_impl.deinit(); }
 
-    virtual ~DefinitionAliasMixin() = default;
 
     bool isAlias() const override { return TRUE; }
 
@@ -437,8 +439,8 @@ class DefinitionAliasMixin : public Base
 
   private:
     virtual Definition *toDefinition_() { return this; }
-    DefinitionMutable *toDefinitionMutable_() override { return 0; }
-    const DefinitionImpl *toDefinitionImpl_() const override { return 0; }
+    DefinitionMutable *toDefinitionMutable_() override { return nullptr; }
+    const DefinitionImpl *toDefinitionImpl_() const override { return nullptr; }
 
     void _setSymbolName(const QCString &name) override { m_symbolName = name; }
     QCString _symbolName() const override { return m_symbolName; }
