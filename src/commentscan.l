@@ -4538,14 +4538,14 @@ static void addXRefItem(yyscan_t yyscanner,
 static void escapeLabel(DString &label)
 {
   if (label.empty()) return;
-  char c = label[0];
+  signed char c = static_cast<signed char>(label[0]);
   if (!((c>='a' && c<='z') || (c>='A' && c<='Z') || c=='_' || c<0))
   {
     label[0]='_'; // replace invalid starting char by _
   }
   for (size_t i=1; i<label.size(); i++)
   {
-    c = label[i];
+    c = static_cast<signed char>(label[i]);
     if (!((c>='a' && c<='z') || (c>='A' && c<='Z') || (c>='0' && c<='9') || c=='_' || c<0))
     {
       label[i]='_'; // replace invalid char by _

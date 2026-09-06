@@ -2649,7 +2649,7 @@ DString latexFilterURL(const DString &s)
       case '\\':  t << "\\\\"; break;
       case '\n':  break; // ignore
       default:
-        if (c<0)
+        if (static_cast<signed char>(c)<0)
         {
           unsigned char id = static_cast<unsigned char>(c);
           t << "\\%" << hex[id>>4] << hex[id&0xF];

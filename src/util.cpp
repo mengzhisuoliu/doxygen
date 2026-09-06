@@ -5234,7 +5234,7 @@ DString detab(const DString &s,size_t &refIndent)
         col++;
         break;
       default: // non-whitespace => update minIndent
-        if (c<0 && i<size) // multibyte sequence
+        if (static_cast<signed char>(c)<0 && i<size) // multibyte sequence
         {
           // special handling of the UTF-8 nbsp character 0xC2 0xA0
           int nb = isUTF8NonBreakableSpace(data);

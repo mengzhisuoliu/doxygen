@@ -71,7 +71,7 @@ size_t updateColumnCount(const char *s,size_t col)
                    break;
         default:
                    col++;
-                   if (c<0) // multi-byte character
+                   if (static_cast<signed char>(c)<0) // multi-byte character
                    {
                      int numBytes = getUTF8CharNumBytes(c);
                      for (int i=0;i<numBytes-1 && (c=*s++);i++) {} // skip over extra chars

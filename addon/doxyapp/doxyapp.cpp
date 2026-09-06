@@ -429,7 +429,7 @@ int main(int argc,char **argv)
   while (1)
   {
     printf("> Type a symbol name or\n> .list for a list of symbols or\n> .quit to exit\n> ");
-    (void)fgets(cmd,256,stdin);
+    if (fgets(cmd,256,stdin)==nullptr) break;
     DString s(cmd);
     if (s.at(s.length()-1)=='\n') s=s.left(s.length()-1); // strip trailing \n
     if (s==".list")

@@ -3656,12 +3656,12 @@ void HtmlGenerator::writeLabel(const DString &label,bool /*isLast*/)
     for (size_t i=0; i<l; i++)
     {
       char c = input.at(i);
-      if (c<0 || (c>='a' && c<='z') || c=='_') // nmstart pattern
+      if (static_cast<signed char>(c)<0 || (c>='a' && c<='z') || c=='_') // nmstart pattern
       {
         nmstart=true;
         result+=c;
       }
-      else if (nmstart && (c<0 || (c>='a' && c<='z') || (c>='0' && c<='9') || c=='_')) // nmchar pattern
+      else if (nmstart && (static_cast<signed char>(c)<0 || (c>='a' && c<='z') || (c>='0' && c<='9') || c=='_')) // nmchar pattern
       {
         result+=c;
       }
