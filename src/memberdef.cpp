@@ -1993,8 +1993,6 @@ void MemberDefImpl::writeLink(OutputList &ol,
   }
 }
 
-static std::mutex g_cachedAnonymousTypeMutex;
-
 void MemberDefImpl::setClassDefOfAnonymousType(const ClassDef *cd)
 {
   m_anonymousType = cd;
